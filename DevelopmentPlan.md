@@ -1,6 +1,6 @@
 1. Complete app features
 
-   * Consider using CompanionDeviceService with startObservingDevicePresence instead of broadcast receiver.
+   * Consider using CompanionDeviceService with startObservingDevicePresence instead of broadcast receiver. (Done)
    * Target SDK version 36 (required for Play Store)
    * Add Log.
      Log should accesible via the action bar probably.

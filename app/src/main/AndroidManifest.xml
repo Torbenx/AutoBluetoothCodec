@@ -4,8 +4,11 @@
     <!-- Up to API 30 the A2DP profile calls are guarded by the legacy BLUETOOTH permission -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- Since API 31 the system binds CodecCompanionService while an associated device is present -->
+    <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE"/>
 
-    <!-- Only needed since API 34 to change the codec, the app works without it before that -->
+    <!-- Since API 31 needed to apply the preferred codec automatically, since API 34 also to change
+         the codec. Without it A2dpConnectReceiver applies the preferred codec, like before API 31. -->
     <uses-feature android:name="android.software.companion_device_setup" android:required="false"/>
 
     <application
@@ -28,8 +31,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".ApplyProfileService" />
-        <receiver android:name=".A2dpConnectReceiver" android:exported="true">
+        <service
+            android:name=".CodecCompanionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
+            <intent-filter>
+                <action android:name="android.companion.CompanionDeviceService"/>
+            </intent-filter>
+        </service>
+        <!-- Disabled since API 31 by values-v31, CompanionPresence enables it again if needed -->
+        <receiver
+            android:name=".A2dpConnectReceiver"
+            android:enabled="@bool/legacy_receiver_enabled"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED"/>
             </intent-filter>

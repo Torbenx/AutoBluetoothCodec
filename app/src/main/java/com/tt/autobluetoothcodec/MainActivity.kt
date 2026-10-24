@@ -138,8 +138,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
     private val associationLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         Log.d(COMPANION_TAG, "result code for association request: " + result.resultCode + when (result.resultCode) { RESULT_OK -> " (ok)" else -> " (not ok)"})
-        // On success onAssociationCreated finishes the request
-        if (result.resultCode != RESULT_OK) {
+        // Since API 33 onAssociationCreated finishes a successful request, before that only the result is reported
+        if (result.resultCode == RESULT_OK && Build.VERSION.SDK_INT < 33) {
+            finishAssociation(success = true, message = null)
+        } else if (result.resultCode != RESULT_OK) {
             finishAssociation(success = false, message = null)
         }
         pullBluetoothState()
@@ -149,6 +151,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         super.onCreate(savedInstanceState)
 
         handler = Handler(mainLooper)
+        CompanionPresence.syncAll(this)
 
         updatePermissionState()
         // After a configuration change the result of a pending request is delivered to this instance
@@ -222,7 +225,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             Log.d(COMPANION_TAG, "association request already in progress")
             return
         }
-        if (Build.VERSION.SDK_INT < 33 || !PermissionUtil.canAssociate(this)) {
+        if (!PermissionUtil.canAssociate(this)) {
             Log.d(COMPANION_TAG, "companion association not supported")
             return
         }
@@ -231,7 +234,26 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         val filter = BluetoothDeviceFilter.Builder().setAddress(device.address).build()
         val request = AssociationRequest.Builder().setSingleDevice(true).addDeviceFilter(filter).build()
         associationInProgress = true
-        onAssociated = onSuccess
+        onAssociated = {
+            CompanionPresence.update(this, device)
+            onSuccess()
+        }
+        if (Build.VERSION.SDK_INT < 33) {
+            // AssociationInfo and the callbacks using it only exist since API 33
+            companionManager.associate(request, object: CompanionDeviceManager.Callback() {
+                @Suppress("OVERRIDE_DEPRECATION")
+                override fun onDeviceFound(intentSender: IntentSender) {
+                    Log.d(COMPANION_TAG, "device found, requesting association...")
+                    associationLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                }
+
+                override fun onFailure(error: CharSequence?) {
+                    Log.d(COMPANION_TAG, "companion association failed: $error")
+                    finishAssociation(success = false, message = error)
+                }
+            }, handler)
+            return
+        }
         companionManager.associate(request, mainExecutor, object: CompanionDeviceManager.Callback() {
             override fun onAssociationPending(intentSender: IntentSender) {
                 Log.d(COMPANION_TAG, "device found, requesting association...")
@@ -292,16 +314,19 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
     private fun savePreferredConfig(device: BluetoothDevice, config: CodecConfig, mayAssociate: Boolean = true) {
         // Without an association the preferred codec can't be applied when the device connects
-        if (mayAssociate && PermissionUtil.isAssociationRequired(this, device)) {
+        if (mayAssociate && (PermissionUtil.isAssociationRequired(this, device)
+                    || PermissionUtil.isAssociationRequiredForAutoApply(this, device))) {
             requestAssociation(device) { savePreferredConfig(device, config, mayAssociate = false) }
             return
         }
         PreferredCodecStore.set(this, device, config)
+        CompanionPresence.update(this, device)
         pullBluetoothState()
     }
 
     private fun deletePreferredConfig(device: BluetoothDevice) {
         PreferredCodecStore.remove(this, device)
+        CompanionPresence.update(this, device)
         pullBluetoothState()
     }
 
@@ -351,6 +376,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     private fun readDeviceData(profile: BluetoothA2dp, device: BluetoothDevice): DeviceData {
         val name = device.name ?: device.address
         val associationRequired = PermissionUtil.isAssociationRequired(this, device)
+                || PermissionUtil.isAssociationRequiredForAutoApply(this, device)
         val associated = PermissionUtil.hasAssociation(this, device)
         val preferredConfig = PreferredCodecStore.get(this, device)
         try {
@@ -856,7 +882,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                 return@Column
             }
             Text(
-                if (device.statusReadable) "Link ${device.name} again so its preferred codec is applied when it connects."
+                if (device.statusReadable) "Link ${device.name} so its preferred codec is applied when it connects."
                 else "Link ${device.name} to see and change its codec.",
                 style = MaterialTheme.typography.bodyMedium
             )
