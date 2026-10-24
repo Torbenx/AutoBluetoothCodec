@@ -4,6 +4,8 @@ import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothCodecConfig
 import android.bluetooth.BluetoothDevice
 import android.os.Build
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Method
 
 object A2dpProfileUtil {
     private val codecConfigClass = ClassLoader.getSystemClassLoader().loadClass("android.bluetooth.BluetoothCodecConfig")
@@ -40,15 +42,26 @@ object A2dpProfileUtil {
         }
     }
 
-    private fun getCodecStatus(profile: BluetoothA2dp, device: BluetoothDevice): Any {
+    // Rethrow the exception of the invoked method, so callers can handle a SecurityException
+    // from the Bluetooth stack directly.
+    private fun invokeUnwrapped(method: Method, receiver: Any, vararg args: Any?): Any? {
+        try {
+            return method.invoke(receiver, *args)
+        } catch (e: InvocationTargetException) {
+            throw e.targetException
+        }
+    }
+
+    // Returns null if the device isn't connected or the Bluetooth service is unavailable
+    private fun getCodecStatus(profile: BluetoothA2dp, device: BluetoothDevice): Any? {
         val method = BluetoothA2dp::class.java.getMethod("getCodecStatus", BluetoothDevice::class.java)
-        return method.invoke(profile, device)!!
+        return invokeUnwrapped(method, profile, device)
     }
 
     private fun toConfigMaskArray(configs: Any?): ArrayList<ConfigMask> {
         configs?: return ArrayList()
         val result = ArrayList<ConfigMask>()
-        if (configs is ArrayList<*>) {
+        if (configs is List<*>) {
             for (inConfig in configs) {
                 result.add(ConfigMask(
                     codecType = codecConfigClass.getMethod("getCodecType").invoke(inConfig) as Int,
@@ -74,11 +87,11 @@ object A2dpProfileUtil {
     fun setCodecConfig(profile: BluetoothA2dp, device: BluetoothDevice, config: AndroidCodecConfig) {
         val codecConfig = createCodecConfig(config)
         val method = BluetoothA2dp::class.java.getMethod("setCodecConfigPreference", BluetoothDevice::class.java, codecConfigClass)
-        method.invoke(profile, device, codecConfig)
+        invokeUnwrapped(method, profile, device, codecConfig)
     }
 
     fun getCurrentCodecConfig(profile: BluetoothA2dp, device: BluetoothDevice): AndroidCodecConfig? {
-        val status = getCodecStatus(profile, device)
+        val status = getCodecStatus(profile, device) ?: return null
         val codecConfig = codecStatusClass.getMethod("getCodecConfig").invoke(status) ?: return null
 
         return AndroidCodecConfig(
@@ -109,7 +122,7 @@ object A2dpProfileUtil {
     }
 
     fun getSelectableCodecConfigs(profile: BluetoothA2dp, device: BluetoothDevice): ArrayList<ConfigMask> {
-        val status = getCodecStatus(profile, device)
+        val status = getCodecStatus(profile, device) ?: return ArrayList()
         return toConfigMaskArray(codecStatusClass.getMethod("getCodecsSelectableCapabilities").invoke(status))
     }
 }

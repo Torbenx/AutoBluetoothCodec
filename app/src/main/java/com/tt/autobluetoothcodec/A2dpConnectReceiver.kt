@@ -24,6 +24,8 @@ class A2dpConnectReceiver : BroadcastReceiver() {
         }
         if (intent.extras!!.getInt(BluetoothProfile.EXTRA_STATE) != BluetoothProfile.STATE_CONNECTED)
             return
+        if (device == null || PreferredCodecStore.get(context, device) == null)
+            return
 
         context.startService(Intent()
             .setComponent(ComponentName(context, ApplyProfileService::class.java))

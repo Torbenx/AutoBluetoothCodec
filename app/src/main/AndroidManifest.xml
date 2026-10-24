@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Up to API 30 the A2DP profile calls are guarded by the legacy BLUETOOTH permission -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
 
-    <uses-feature android:name="android.software.companion_device_setup"/>
+    <!-- Only needed since API 34 to change the codec, the app works without it before that -->
+    <uses-feature android:name="android.software.companion_device_setup" android:required="false"/>
 
     <application
         android:allowBackup="true"

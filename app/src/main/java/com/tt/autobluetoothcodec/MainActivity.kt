@@ -18,17 +18,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.ServiceConnection
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap.Config
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
+import android.provider.Settings
 import android.util.Log
-import android.widget.Button
 import android.widget.Space
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateContentSize
@@ -58,6 +63,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
@@ -66,6 +74,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -89,6 +99,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -99,8 +110,39 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     companion object {
         private const val TAG = "MainActivity"
         private const val COMPANION_TAG = "CompanionAssociation"
-        private const val PERMISSION_REQUEST_CODE = 100
-        private const val COMPANION_DEVICE_ASSOCIATION_REQUEST_CODE = 200
+
+        // Not const, a constant false condition would prevent the smart casts in the guarded blocks
+        private val SHOW_UNCONFIGURABLE_OPTIONS = false
+    }
+
+    private enum class PermissionState { GRANTED, DENIED, PERMANENTLY_DENIED }
+
+    // Development options are only shown in debuggable builds
+    private val showDevelopmentOptions by lazy {
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    private var permissionState by mutableStateOf(PermissionState.DENIED)
+
+    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            updatePermissionState()
+        } else if (Build.VERSION.SDK_INT >= 31
+            && !shouldShowRequestPermissionRationale(Manifest.permission.BLUETOOTH_CONNECT)) {
+            // Denied without a rationale means the system won't show the permission dialog again
+            permissionState = PermissionState.PERMANENTLY_DENIED
+        } else {
+            permissionState = PermissionState.DENIED
+        }
+    }
+
+    private val associationLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        Log.d(COMPANION_TAG, "result code for association request: " + result.resultCode + when (result.resultCode) { RESULT_OK -> " (ok)" else -> " (not ok)"})
+        // On success onAssociationCreated finishes the request
+        if (result.resultCode != RESULT_OK) {
+            finishAssociation(success = false, message = null)
+        }
+        pullBluetoothState()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,43 +150,61 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
         handler = Handler(mainLooper)
 
-        if (!PermissionUtil.testPermission(this)) {
-            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), PERMISSION_REQUEST_CODE)
-        } else {
-            onCreateWithPermission()
+        updatePermissionState()
+        // After a configuration change the result of a pending request is delivered to this instance
+        if (permissionState != PermissionState.GRANTED && savedInstanceState == null) {
+            requestBluetoothPermission()
         }
 
         setContent { Foo() }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSION_REQUEST_CODE && permissions.size == 1 && grantResults.size == 1) {
-            if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                onCreateWithPermission()
-            }
+    override fun onDestroy() {
+        super.onDestroy()
+        a2dpProfile?.let { closeProfileProxy(it) }
+        a2dpProfile = null
+    }
+
+    private fun updatePermissionState() {
+        if (PermissionUtil.testPermission(this)) {
+            permissionState = PermissionState.GRANTED
+            connectProfile()
+        } else if (permissionState == PermissionState.GRANTED) {
+            permissionState = PermissionState.DENIED
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        when (requestCode) {
-            COMPANION_DEVICE_ASSOCIATION_REQUEST_CODE -> {
-                Log.d(COMPANION_TAG, "result code for association request: " + resultCode + when (resultCode) { RESULT_OK -> " (ok)" else -> " (not ok)"})
-            }
-            else -> super.onActivityResult(requestCode, resultCode, data)
+    private fun requestBluetoothPermission() {
+        if (Build.VERSION.SDK_INT >= 31) {
+            permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
         }
     }
 
-    private fun onCreateWithPermission() {
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+    }
+
+    private fun connectProfile() {
+        if (profileRequested)
+            return
+        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+        if (adapter == null) {
+            Log.w(TAG, "device has no Bluetooth adapter")
+            return
+        }
+        profileRequested = adapter.getProfileProxy(this, this, BluetoothProfile.A2DP)
+    }
+
+    private fun closeProfileProxy(profile: BluetoothA2dp) {
         val manager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
-        manager.adapter.getProfileProxy(this, this, BluetoothProfile.A2DP)
+        manager.adapter?.closeProfileProxy(BluetoothProfile.A2DP, profile)
     }
 
     override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
+        if (isDestroyed) {
+            (proxy as? BluetoothA2dp)?.let { closeProfileProxy(it) }
+            return
+        }
         a2dpProfile = proxy as BluetoothA2dp
         pullBluetoothState()
     }
@@ -154,64 +214,166 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         pullBluetoothState()
     }
 
-    fun doWithAssociation(device: BluetoothDevice, r: Runnable) {
-        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_COMPANION_DEVICE_SETUP)) {
-            Log.d(COMPANION_TAG, "companion feature not supported/required")
-            r.run()
+    private var associationInProgress by mutableStateOf(false)
+    private var onAssociated: (() -> Unit)? = null
+
+    private fun requestAssociation(device: BluetoothDevice, onSuccess: () -> Unit) {
+        if (associationInProgress) {
+            Log.d(COMPANION_TAG, "association request already in progress")
+            return
+        }
+        if (Build.VERSION.SDK_INT < 33 || !PermissionUtil.canAssociate(this)) {
+            Log.d(COMPANION_TAG, "companion association not supported")
             return
         }
 
-        val companionManager = getSystemService(Context.COMPANION_DEVICE_SERVICE) as CompanionDeviceManager
-        if (companionManager.associations.contains(device.address)) {
-            Log.d(COMPANION_TAG, "already associated with device")
-            r.run()
-            return
-        }
-
+        val companionManager = getSystemService(CompanionDeviceManager::class.java)
         val filter = BluetoothDeviceFilter.Builder().setAddress(device.address).build()
         val request = AssociationRequest.Builder().setSingleDevice(true).addDeviceFilter(filter).build()
-        companionManager.associate(request, object: CompanionDeviceManager.Callback() {
-            override fun onFailure(message: CharSequence?) {
-                Log.d(COMPANION_TAG, "companion association failed: " + message.toString())
-            }
-
+        associationInProgress = true
+        onAssociated = onSuccess
+        companionManager.associate(request, mainExecutor, object: CompanionDeviceManager.Callback() {
             override fun onAssociationPending(intentSender: IntentSender) {
                 Log.d(COMPANION_TAG, "device found, requesting association...")
-                startIntentSenderForResult(intentSender, 0, null, 0, 0, 0)
+                associationLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
             }
+
             override fun onAssociationCreated(info: AssociationInfo) {
                 Log.d(COMPANION_TAG, "companion association created")
-                r.run()
+                finishAssociation(success = true, message = null)
             }
-        }, null)
+
+            override fun onFailure(error: CharSequence?) {
+                Log.d(COMPANION_TAG, "companion association failed: $error")
+                finishAssociation(success = false, message = error)
+            }
+        })
+    }
+
+    private fun finishAssociation(success: Boolean, message: CharSequence?) {
+        if (!associationInProgress)
+            return
+        associationInProgress = false
+        val action = onAssociated
+        onAssociated = null
+        if (success) {
+            action?.invoke()
+        } else {
+            val text = "Device wasn't linked" + (message?.let { ": $it" } ?: "")
+            Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun applyCodecConfig(device: BluetoothDevice, config: CodecConfig, mayAssociate: Boolean = true) {
+        Log.d(TAG, "applyCodecConfig: ${config.toAndroid()}")
+        val profile = a2dpProfile ?: return
+        if (mayAssociate && PermissionUtil.isAssociationRequired(this, device)) {
+            requestAssociation(device) { applyCodecConfig(device, config, mayAssociate = false) }
+            return
+        }
+        try {
+            A2dpProfileUtil.setCodecConfig(profile, device, config.toAndroid())
+        } catch (e: SecurityException) {
+            // An updated Bluetooth module may require an association on older versions as well
+            if (mayAssociate && PermissionUtil.canAssociate(this) && !PermissionUtil.hasAssociation(this, device)) {
+                requestAssociation(device) { applyCodecConfig(device, config, mayAssociate = false) }
+            } else {
+                Log.w(TAG, "Bluetooth refused to change the codec", e)
+                Toast.makeText(this, "Bluetooth didn't allow changing the codec", Toast.LENGTH_SHORT).show()
+            }
+            return
+        } catch (e: Exception) {
+            Log.e(TAG, "changing the codec failed", e)
+            Toast.makeText(this, "Changing the codec failed", Toast.LENGTH_SHORT).show()
+            return
+        }
+        pullBluetoothState()
+    }
+
+    private fun savePreferredConfig(device: BluetoothDevice, config: CodecConfig, mayAssociate: Boolean = true) {
+        // Without an association the preferred codec can't be applied when the device connects
+        if (mayAssociate && PermissionUtil.isAssociationRequired(this, device)) {
+            requestAssociation(device) { savePreferredConfig(device, config, mayAssociate = false) }
+            return
+        }
+        PreferredCodecStore.set(this, device, config)
+        pullBluetoothState()
+    }
+
+    private fun deletePreferredConfig(device: BluetoothDevice) {
+        PreferredCodecStore.remove(this, device)
+        pullBluetoothState()
+    }
+
+    private fun unlinkDevice(device: BluetoothDevice) {
+        if (PermissionUtil.removeAssociation(this, device)) {
+            Log.d(COMPANION_TAG, "companion association removed")
+            Toast.makeText(this, "Device unlinked", Toast.LENGTH_SHORT).show()
+        }
+        pullBluetoothState()
     }
 
     data class DeviceData(
         val device: BluetoothDevice,
+        val name: String,
+        val androidCodecConfig: AndroidCodecConfig?,
+        // null if the codec is unknown to this app or no codec status is available
         val codecConfig: CodecConfig?,
         val configMasks: ArrayList<A2dpProfileUtil.ConfigMask>,
+        // false if the Bluetooth stack refused to report the codec status
+        val statusReadable: Boolean,
+        val associationRequired: Boolean,
+        val associated: Boolean,
+        val preferredConfig: CodecConfig?,
     )
 
     private var a2dpProfile: BluetoothA2dp? = null
+    private var profileRequested = false
     private var handler: Handler? = null
 
     private var connectedDevices by mutableStateOf(emptyList<DeviceData>())
 
     private fun pullBluetoothState() {
-        if (a2dpProfile != null) {
-            val devices = ArrayList<DeviceData>()
-            for (device in a2dpProfile!!.connectedDevices) {
-                Log.d(TAG, A2dpProfileUtil.getCurrentCodecConfig(a2dpProfile!!, device).toString())
-                devices.add(
-                    DeviceData(
-                    device = device,
-                    codecConfig = A2dpProfileUtil.getCurrentCodecConfig(a2dpProfile!!, device)?.let { CodecConfig.fromAndroid(it) },
-                    configMasks = A2dpProfileUtil.getSelectableCodecConfigs(a2dpProfile!!, device)
-                ))
-            }
-            connectedDevices = devices
-        } else {
+        val profile = a2dpProfile
+        if (profile == null) {
             connectedDevices = emptyList()
+            return
+        }
+        val devices = try {
+            profile.connectedDevices
+        } catch (e: SecurityException) {
+            Log.w(TAG, "not allowed to list connected devices", e)
+            emptyList()
+        }
+        connectedDevices = devices.map { readDeviceData(profile, it) }
+    }
+
+    private fun readDeviceData(profile: BluetoothA2dp, device: BluetoothDevice): DeviceData {
+        val name = device.name ?: device.address
+        val associationRequired = PermissionUtil.isAssociationRequired(this, device)
+        val associated = PermissionUtil.hasAssociation(this, device)
+        val preferredConfig = PreferredCodecStore.get(this, device)
+        try {
+            val androidConfig = A2dpProfileUtil.getCurrentCodecConfig(profile, device)
+            Log.d(TAG, androidConfig.toString())
+            return DeviceData(
+                device = device,
+                name = name,
+                androidCodecConfig = androidConfig,
+                codecConfig = androidConfig?.let { CodecConfig.fromAndroid(it) },
+                configMasks = A2dpProfileUtil.getSelectableCodecConfigs(profile, device),
+                statusReadable = true,
+                associationRequired = associationRequired,
+                associated = associated,
+                preferredConfig = preferredConfig
+            )
+        } catch (e: SecurityException) {
+            // Since API 36 reading the codec status requires an association as well
+            Log.d(TAG, "Bluetooth refused to report the codec status of $name")
+            return DeviceData(device, name, null, null, ArrayList(), statusReadable = false, associationRequired, associated, preferredConfig)
+        } catch (e: Exception) {
+            Log.e(TAG, "reading the codec status of $name failed", e)
+            return DeviceData(device, name, null, null, ArrayList(), statusReadable = true, associationRequired, associated, preferredConfig)
         }
     }
 
@@ -224,6 +386,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     override fun onStart() {
         super.onStart()
 
+        // The permission may have been granted in the app settings meanwhile
+        updatePermissionState()
         timer().run()
     }
 
@@ -387,7 +551,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
     private fun findSelectableConfig(device: DeviceData, @CodecConfig.CodecType newCodecType: Int): CodecConfig {
         val validConfigs = TreeMap<Int, CodecConfig>()
-        val curConfig = device.codecConfig!!
+        val curSampleRate = device.androidCodecConfig?.sampleRate ?: CodecConfig.SAMPLE_RATE_NONE
+        val curBitsPerSample = device.androidCodecConfig?.bitsPerSample ?: CodecConfig.BITS_PER_SAMPLE_NONE
         for (configMask in device.configMasks) {
             if (configMask.codecType != newCodecType)
                 continue
@@ -395,9 +560,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             val newConfig = CodecConfig.makeCodecConfig(newCodecType)!!
             var score = 0
 
-            if (configMask.isSampleRateSupported(curConfig.sampleRate)) {
+            if (configMask.isSampleRateSupported(curSampleRate)) {
                 score += 2
-                newConfig.sampleRate = curConfig.sampleRate
+                newConfig.sampleRate = curSampleRate
             } else {
                 for (sampleRate in CodecConfig.SAMPLE_RATES) {
                     if (configMask.isSampleRateSupported(sampleRate)) {
@@ -406,9 +571,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                     }
                 }
             }
-            if (configMask.isSampleSizeSupported(curConfig.bitsPerSample)) {
+            if (configMask.isSampleSizeSupported(curBitsPerSample)) {
                 score += 1
-                newConfig.bitsPerSample = curConfig.bitsPerSample
+                newConfig.bitsPerSample = curBitsPerSample
             } else {
                 for (bitsPerSample in CodecConfig.SAMPLE_SIZES) {
                     if (configMask.isSampleSizeSupported(bitsPerSample)) {
@@ -439,38 +604,39 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         return false
     }
 
-    private fun isSampleRateSelectable(device: DeviceData, @CodecConfig.SampleRate sampleRate: Int): Boolean {
-        val config = device.codecConfig!!
+    private fun isSampleRateSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.SampleRate sampleRate: Int): Boolean {
         return isConfigSelectable(device, config.getCodecType(), sampleRate, config.bitsPerSample)
     }
 
-    private fun isSampleSizeSelectable(device: DeviceData, @CodecConfig.BitsPerSample bitsPerSample: Int): Boolean {
-        val config = device.codecConfig!!
+    private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.BitsPerSample bitsPerSample: Int): Boolean {
         return isConfigSelectable(device, config.getCodecType(), config.sampleRate, bitsPerSample)
     }
 
     @Composable
     private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
-        val config = device.codecConfig!!
         Column {
+            val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
             ConfigSelectRow(
                 "Codec",
                 CodecConfig.CODEC_TYPES.map {
                     ConfigRowItem(CodecConfig.getCodecName(it)!!, it, isCodecTypeSupported(device, it))
                 },
-                config.getCodecType(),
+                currentCodecType,
                 onSelected = {
-                    if (it != config.getCodecType()) {
+                    if (it != currentCodecType) {
                         onConfigChange(findSelectableConfig(device, it))
                     }
                 }
             )
 
+            // The current codec is unknown to this app, so only offer switching to a known one
+            val config = device.codecConfig ?: return@Column
+
             Spacer(Modifier.height(16.dp))
             ConfigSelectRow(
                 "Sample Rate",
                 CodecConfig.SAMPLE_RATES.map {
-                    ConfigRowItem("${CodecConfig.getSampleRate(it)} Hz", it, isSampleRateSelectable(device, it))
+                    ConfigRowItem("${CodecConfig.getSampleRate(it)} Hz", it, isSampleRateSelectable(device, config, it))
                 },
                 config.sampleRate,
                 onSelected = {
@@ -483,7 +649,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             Spacer(Modifier.height(16.dp))
             ConfigSelectRow(
                 "Bits per Sample",
-                CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}", it, isSampleSizeSelectable(device, it)) },
+                CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}", it, isSampleSizeSelectable(device, config, it)) },
                 config.bitsPerSample,
                 onSelected = {
                     val newConfig = config.clone() as CodecConfig
@@ -509,7 +675,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             }
 
             // This is in the AOSP bluetooth source but appears to not be configurable
-            if (false && config is AACCodecConfig) {
+            if (SHOW_UNCONFIGURABLE_OPTIONS && config is AACCodecConfig) {
                 Spacer(Modifier.height(16.dp))
                 ConfigSelectRow(
                     "Variable Bitrate",
@@ -531,7 +697,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             }
 
             // This is in the AOSP bluetooth source but appears to not be configurable
-            if (false && config is OpusCodecConfig) {
+            if (SHOW_UNCONFIGURABLE_OPTIONS && config is OpusCodecConfig) {
                 Spacer(Modifier.height(16.dp))
                 ConfigSelectRow(
                     "Encode Complexity",
@@ -565,28 +731,46 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.height(48.dp)
                 ) {
-                    Text(device.device.name, style = MaterialTheme.typography.titleLarge)
+                    Text(device.name, style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.weight(1f).defaultMinSize(minWidth = 8.dp))
 
-                    var isButton by remember { mutableStateOf(true) }
+                    val preferredConfig = device.preferredConfig
+                    val currentConfig = device.codecConfig
+                    val isPreferredActive = preferredConfig != null && preferredConfig == currentConfig
 
-                    StatusChip(
-                        if (isButton) "Use Preferred Codec" else "Preferred Codec",
-                        statusChipColors(
-                            labelBackgroundColor = Color(0xFFE8F5E9),
-                            labelTextColor = Color(0xFF388E3C)
-                        ),
-                        isButton = isButton,
-                        onButtonClick = { isButton = false }
-                    )
+                    // A codec unknown to this app can't be saved as preference
+                    if (device.statusReadable && currentConfig != null) {
+                        StatusChip(
+                            if (isPreferredActive) "Preferred Codec" else "Save As Preferred Codec",
+                            statusChipColors(
+                                labelBackgroundColor = Color(0xFFE8F5E9),
+                                labelTextColor = Color(0xFF388E3C)
+                            ),
+                            isButton = !isPreferredActive,
+                            onButtonClick = { savePreferredConfig(device.device, currentConfig) }
+                        )
+                    }
+                    if (preferredConfig != null || (showDevelopmentOptions && device.associated)) {
+                        DeviceMenu(device, isPreferredActive)
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
-                AnimatedVisibility(!extended) {
+                // Choosing a codec requests the association anyway, so only ask up front if the
+                // codec can't be shown or the preferred codec can't be applied automatically
+                if (!device.statusReadable || (device.associationRequired && device.preferredConfig != null)) {
+                    AssociationRow(device)
+                    Spacer(Modifier.height(8.dp))
+                }
+                AnimatedVisibility(!extended && device.statusReadable) {
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        val config = device.codecConfig!!
+                        val config = device.codecConfig
+                        if (config == null) {
+                            ActiveConfigChip(if (device.androidCodecConfig != null) "Unsupported codec" else "No codec information")
+                            return@FlowRow
+                        }
                         CodecConfig.getCodecName(config.getCodecType())?.let {
                             ActiveConfigChip(it)
                         }
@@ -608,19 +792,110 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                         }
                     }
                 }
-                AnimatedVisibility(extended) {
+                AnimatedVisibility(extended && device.statusReadable) {
                     CodecConfigSelection(
                         device,
                         onConfigChange = {
                             Log.d(TAG, "onConfigChange: ${it.toAndroid()}")
-                            doWithAssociation(device.device) {
-                                if (a2dpProfile != null) {
-                                    A2dpProfileUtil.setCodecConfig(a2dpProfile!!, device.device, it.toAndroid())
-                                    pullBluetoothState()
-                                }
-                            }
+                            applyCodecConfig(device.device, it)
                         }
                     )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean) {
+        var expanded by remember { mutableStateOf(false) }
+        val preferredConfig = device.preferredConfig
+        Box {
+            IconButton(onClick = { expanded = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                if (preferredConfig != null && !isPreferredActive) {
+                    DropdownMenuItem(
+                        text = { Text("Restore Preferred Codec") },
+                        onClick = {
+                            expanded = false
+                            applyCodecConfig(device.device, preferredConfig)
+                        }
+                    )
+                }
+                if (preferredConfig != null) {
+                    DropdownMenuItem(
+                        text = { Text("Delete Preferred Codec") },
+                        onClick = {
+                            expanded = false
+                            deletePreferredConfig(device.device)
+                        }
+                    )
+                }
+                if (showDevelopmentOptions && device.associated) {
+                    DropdownMenuItem(
+                        text = { Text("Unlink Device (Debug)") },
+                        onClick = {
+                            expanded = false
+                            unlinkDevice(device.device)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun AssociationRow(device: DeviceData) {
+        Column {
+            if (!PermissionUtil.canAssociate(this@MainActivity)) {
+                Text(
+                    "This phone can't link devices, so the codec of ${device.name} can't be changed.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                return@Column
+            }
+            Text(
+                if (device.statusReadable) "Link ${device.name} again so its preferred codec is applied when it connects."
+                else "Link ${device.name} to see and change its codec.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { requestAssociation(device.device) { pullBluetoothState() } },
+                enabled = !associationInProgress
+            ) {
+                Text("Allow")
+            }
+        }
+    }
+
+    @Composable
+    private fun PermissionRequired() {
+        Column(
+            modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "Auto Bluetooth Codec needs the Nearby devices permission to access the codec of your Bluetooth devices.",
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(16.dp))
+            if (permissionState == PermissionState.PERMANENTLY_DENIED) {
+                Text(
+                    "Allow it in the app settings under Permissions.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = { openAppSettings() }) {
+                    Text("Open settings")
+                }
+            } else {
+                Button(onClick = { requestBluetoothPermission() }) {
+                    Text("Grant permission")
                 }
             }
         }
@@ -630,9 +905,13 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     @Composable
     private fun Foo() {
         Box(Modifier.fillMaxWidth().fillMaxHeight().background(MaterialTheme.colorScheme.background)) {
-            Column {
-                for (device in connectedDevices) {
-                    DeviceCard(device, initialExtended = false)
+            if (permissionState != PermissionState.GRANTED) {
+                PermissionRequired()
+            } else {
+                Column {
+                    for (device in connectedDevices) {
+                        DeviceCard(device, initialExtended = false)
+                    }
                 }
             }
         }

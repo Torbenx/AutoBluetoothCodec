@@ -153,6 +153,16 @@ abstract class CodecConfig : Cloneable {
         bitsPerSample = config.bitsPerSample
     }
 
+    // toAndroid() maps every combination of parameters to a distinct value, so comparing it
+    // compares all parameters, including the ones of subclasses
+    override fun equals(other: Any?): Boolean {
+        return other is CodecConfig && other.toAndroid() == toAndroid()
+    }
+
+    override fun hashCode(): Int {
+        return toAndroid().hashCode()
+    }
+
     @SampleRate
     var sampleRate: Int = SAMPLE_RATE_NONE
 

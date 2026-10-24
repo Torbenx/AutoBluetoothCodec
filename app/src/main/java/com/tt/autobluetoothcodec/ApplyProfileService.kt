@@ -34,18 +34,17 @@ class ApplyProfileService : Service(), BluetoothProfile.ServiceListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+        val device = intent?.extras?.getParcelable<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+        val config = device?.let { PreferredCodecStore.get(this, it) }
+        if (!PermissionUtil.testPermission(this)) {
             Log.i(TAG, "received connect intent, but context has insufficient permissions")
             stopSelf()
+        } else if (device == null || config == null) {
+            Log.i(TAG, "received intent without device or device has no preferred codec")
+            if (pendingConnectedDevices.isEmpty())
+                stopSelf()
         } else {
-            val config = LDACCodecConfig()
-            config.sampleRate = CodecConfig.SAMPLE_RATE_44100
-            config.bitsPerSample = CodecConfig.BITS_PER_SAMPLE_24
-            config.bitrate = LDACCodecConfig.BITRATE_HIGH
-
-            pendingConnectedDevices.add(
-                PendingDevice(
-                    intent!!.extras!!.getParcelable<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)!!, config))
+            pendingConnectedDevices.add(PendingDevice(device, config))
             if (a2dpProfile != null)
                 processPendingDevices()
         }
@@ -90,9 +89,15 @@ class ApplyProfileService : Service(), BluetoothProfile.ServiceListener {
                     continue
                 }
 
+                if (PermissionUtil.isAssociationRequired(this, item.device)) {
+                    Log.i(TAG, "no companion association for ${item.device.name}, can't change its codec")
+                    continue
+                }
+
                 if (item.attemptCount > 0) {
                     val actualConfig = A2dpProfileUtil.getCurrentCodecConfig(a2dpProfile!!, item.device)
-                    if (actualConfig == item.targetConfig.toAndroid()) {
+                    val actualCodecConfig = actualConfig?.let { CodecConfig.fromAndroid(it) }
+                    if (actualCodecConfig == item.targetConfig) {
                         Log.i(TAG, "Codec applied correctly on ${item.device.name}")
                         continue
                     }
@@ -111,6 +116,8 @@ class ApplyProfileService : Service(), BluetoothProfile.ServiceListener {
                 item.attemptCount += 1
                 item.lastApplyAttempt = now
                 pendingConnectedDevices.add(item)
+            } catch (e: SecurityException) {
+                Log.i(TAG, "Bluetooth refused codec access for ${item.device.name}", e)
             } catch (e: Throwable) {
                 Log.i(TAG, "codec change for ${item.device.name} ran into exception", e)
             }
