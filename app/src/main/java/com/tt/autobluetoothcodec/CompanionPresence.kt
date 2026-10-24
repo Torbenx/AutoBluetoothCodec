@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.companion.CompanionDeviceManager
 import android.companion.DeviceNotAssociatedException
+import android.companion.ObservingDevicePresenceRequest
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
@@ -50,6 +51,10 @@ object CompanionPresence {
 
     @RequiresApi(31)
     private fun setObserving(context: Context, device: BluetoothDevice, observe: Boolean) {
+        if (Build.VERSION.SDK_INT >= 36) {
+            setObservingById(context, device, observe)
+            return
+        }
         val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
         for (address in PermissionUtil.findAssociatedAddresses(context, device)) {
             try {
@@ -61,6 +66,28 @@ object CompanionPresence {
                 Log.d(TAG, (if (observe) "observing" else "not observing") + " presence of $address")
             } catch (e: DeviceNotAssociatedException) {
                 Log.w(TAG, "can't change observing $address, it isn't associated", e)
+            }
+        }
+    }
+
+    /**
+     * Since API 36 the address variants are deprecated, the system implements them by looking up
+     * the association and observing it by its id.
+     */
+    @RequiresApi(36)
+    private fun setObservingById(context: Context, device: BluetoothDevice, observe: Boolean) {
+        val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
+        for (association in PermissionUtil.findAssociations(context, device)) {
+            val request = ObservingDevicePresenceRequest.Builder().setAssociationId(association.id).build()
+            try {
+                if (observe)
+                    companionManager.startObservingDevicePresence(request)
+                else
+                    companionManager.stopObservingDevicePresence(request)
+                Log.d(TAG, (if (observe) "observing" else "not observing") + " presence of association ${association.id}")
+            } catch (e: IllegalArgumentException) {
+                // The association was removed meanwhile
+                Log.w(TAG, "can't change observing association ${association.id}", e)
             }
         }
     }

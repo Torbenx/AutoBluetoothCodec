@@ -3,6 +3,7 @@ package com.tt.autobluetoothcodec
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.util.Log
+import androidx.core.content.edit
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -46,11 +47,11 @@ object PreferredCodecStore {
             .put("codecSpecific2", android.codecSpecific2)
             .put("codecSpecific3", android.codecSpecific3)
             .put("codecSpecific4", android.codecSpecific4)
-        preferences(context).edit().putString(key(device), json.toString()).apply()
+        preferences(context).edit { putString(key(device), json.toString()) }
     }
 
     fun remove(context: Context, device: BluetoothDevice) {
-        preferences(context).edit().remove(key(device)).apply()
+        preferences(context).edit { remove(key(device)) }
     }
 
     private fun preferences(context: Context) =

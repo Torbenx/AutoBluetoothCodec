@@ -2,10 +2,12 @@ package com.tt.autobluetoothcodec
 
 import android.Manifest
 import android.bluetooth.BluetoothDevice
+import android.companion.AssociationInfo
 import android.companion.CompanionDeviceManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.RequiresApi
 
 object PermissionUtil {
     /**
@@ -38,7 +40,7 @@ object PermissionUtil {
         CompanionPresence.stopObserving(context, device)
         val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
         if (Build.VERSION.SDK_INT >= 33) {
-            val associations = companionManager.myAssociations.filter { matches(it.deviceMacAddress?.toString(), device) }
+            val associations = findAssociations(context, device)
             for (association in associations) {
                 companionManager.disassociate(association.id)
             }
@@ -58,6 +60,14 @@ object PermissionUtil {
      */
     fun findAssociatedAddresses(context: Context, device: BluetoothDevice): List<String> {
         return getAssociatedAddresses(context).filter { matches(it, device) }
+    }
+
+    @RequiresApi(33)
+    fun findAssociations(context: Context, device: BluetoothDevice): List<AssociationInfo> {
+        if (!canAssociate(context))
+            return emptyList()
+        val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
+        return companionManager.myAssociations.filter { matches(it.deviceMacAddress?.toString(), device) }
     }
 
     fun getAssociatedAddresses(context: Context): List<String> {

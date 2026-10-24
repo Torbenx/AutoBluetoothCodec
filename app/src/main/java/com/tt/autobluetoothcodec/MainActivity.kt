@@ -1,11 +1,7 @@
 package com.tt.autobluetoothcodec
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.app.Activity
 import android.bluetooth.BluetoothA2dp
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothClass.Device
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -13,25 +9,20 @@ import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
-import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
-import android.content.ServiceConnection
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
-import android.graphics.Bitmap.Config
 import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.Handler
-import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
-import android.widget.Space
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -41,12 +32,7 @@ import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.animateDp
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -54,41 +40,33 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardColors
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
-import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SuggestionChip
-import androidx.compose.material3.SuggestionChipDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,13 +75,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.HorizontalAlignmentLine
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.flow.Flow
 import java.util.TreeMap
 
 class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
@@ -148,6 +124,14 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Since API 35 the window is always edge-to-edge. There is no dark theme yet, so the system
+        // bars have to stay light even if the system is in dark mode. The navigation bar keeps the
+        // translucent white scrim enableEdgeToEdge uses by default for three-button navigation.
+        val navigationBarScrim = android.graphics.Color.argb(0xe6, 0xff, 0xff, 0xff)
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(navigationBarScrim, navigationBarScrim)
+        )
         super.onCreate(savedInstanceState)
 
         handler = Handler(mainLooper)
@@ -897,9 +881,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     }
 
     @Composable
-    private fun PermissionRequired() {
+    private fun PermissionRequired(modifier: Modifier) {
         Column(
-            modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(24.dp),
+            modifier = modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -927,14 +911,20 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Preview(showBackground = true)
     @Composable
     private fun Foo() {
-        Box(Modifier.fillMaxWidth().fillMaxHeight().background(MaterialTheme.colorScheme.background)) {
+        Scaffold(
+            topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
+            // Also keeps the content clear of display cutouts in landscape
+            contentWindowInsets = WindowInsets.safeDrawing
+        ) { innerPadding ->
             if (permissionState != PermissionState.GRANTED) {
-                PermissionRequired()
+                PermissionRequired(Modifier.padding(innerPadding))
             } else {
-                Column {
+                // Padding inside the scroll container, so the cards scroll behind the navigation bar
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
                     for (device in connectedDevices) {
                         DeviceCard(device, initialExtended = false)
                     }
