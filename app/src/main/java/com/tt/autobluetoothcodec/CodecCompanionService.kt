@@ -42,18 +42,24 @@ class CodecCompanionService : CompanionDeviceService() {
                 return
             val device = IntentCompat.getParcelableExtra(intent, BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
             if (device != null && device.address in presentDevices) {
-                Log.i(TAG, "A2DP connected to ${device.address}")
-                applyCodec(device)
+                val operation = EventLog.get(context).begin(EventType.A2DP_CONNECTED, LogDevice.of(device),
+                    message = "companion service")
+                applyCodec(device, operation)
             }
         }
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onDeviceAppeared(address: String) {
-        Log.i(TAG, "device appeared: $address")
-        val device = getDevice(address) ?: return
+        val device = getDevice(address)
+        val operation = EventLog.get(this).begin(EventType.DEVICE_APPEARED,
+            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()))
+        if (device == null) {
+            operation.resolve(EventType.ERROR, message = "no Bluetooth adapter")
+            return
+        }
         if (PreferredCodecStore.get(this, device) == null) {
-            Log.i(TAG, "device $address has no preferred codec")
+            operation.resolve(EventType.NO_PREFERRED_CODEC)
             return
         }
         presentDevices.add(device.address)
@@ -63,15 +69,18 @@ class CodecCompanionService : CompanionDeviceService() {
             receiverRegistered = true
         }
         // Applies right away if A2DP is connected already, otherwise the receiver picks it up
-        applyCodec(device)
+        applyCodec(device, operation)
     }
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onDeviceDisappeared(address: String) {
-        Log.i(TAG, "device disappeared: $address")
-        val device = getDevice(address) ?: return
+        val device = getDevice(address)
+        EventLog.get(this).log(EventType.DEVICE_DISAPPEARED,
+            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()))
+        if (device == null)
+            return
         presentDevices.remove(device.address)
-        applier?.cancel(device)
+        applier?.cancel(device, "device disappeared")
     }
 
     override fun onDestroy() {
@@ -84,12 +93,14 @@ class CodecCompanionService : CompanionDeviceService() {
         applier = null
     }
 
-    private fun applyCodec(device: BluetoothDevice) {
+    private fun applyCodec(device: BluetoothDevice, operation: EventLog.Operation) {
         val applier = this.applier ?: CodecApplier(this) {}.also { this.applier = it }
         try {
-            applier.apply(device)
+            applier.apply(device, operation)
         } catch (e: Throwable) {
             Log.e(TAG, "applying the codec of ${device.address} failed", e)
+            if (operation.isOpen)
+                operation.resolve(EventType.ERROR, message = e.toString())
         }
     }
 

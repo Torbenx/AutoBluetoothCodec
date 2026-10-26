@@ -20,16 +20,17 @@ import androidx.annotation.RequiresApi
 object CompanionPresence {
     private const val TAG = "CompanionPresence"
 
-    fun update(context: Context, device: BluetoothDevice) {
+    /** [logChange] logs the observing state to the [EventLog], failures are logged anyway. */
+    fun update(context: Context, device: BluetoothDevice, logChange: Boolean = true) {
         if (Build.VERSION.SDK_INT < 31 || !PermissionUtil.canAssociate(context))
             return
-        setObserving(context, device, PreferredCodecStore.get(context, device) != null)
+        setObserving(context, device, PreferredCodecStore.get(context, device) != null, logChange)
     }
 
     fun stopObserving(context: Context, device: BluetoothDevice) {
         if (Build.VERSION.SDK_INT < 31 || !PermissionUtil.canAssociate(context))
             return
-        setObserving(context, device, false)
+        setObserving(context, device, false, logChange = true)
     }
 
     /**
@@ -44,15 +45,16 @@ object CompanionPresence {
         updateReceiverEnabled(context)
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return
         for (address in PermissionUtil.getAssociatedAddresses(context)) {
-            // getRemoteDevice only accepts upper case addresses
-            update(context, adapter.getRemoteDevice(address.uppercase()))
+            // getRemoteDevice only accepts upper case addresses. This runs on every start of the
+            // app and usually changes nothing, so only failures are logged.
+            update(context, adapter.getRemoteDevice(address.uppercase()), logChange = false)
         }
     }
 
     @RequiresApi(31)
-    private fun setObserving(context: Context, device: BluetoothDevice, observe: Boolean) {
+    private fun setObserving(context: Context, device: BluetoothDevice, observe: Boolean, logChange: Boolean) {
         if (Build.VERSION.SDK_INT >= 36) {
-            setObservingById(context, device, observe)
+            setObservingById(context, device, observe, logChange)
             return
         }
         val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
@@ -64,8 +66,11 @@ object CompanionPresence {
                 else
                     companionManager.stopObservingDevicePresence(address)
                 Log.d(TAG, (if (observe) "observing" else "not observing") + " presence of $address")
+                if (logChange)
+                    logObserving(context, device, observe)
             } catch (e: DeviceNotAssociatedException) {
                 Log.w(TAG, "can't change observing $address, it isn't associated", e)
+                EventLog.get(context).log(EventType.OBSERVING_FAILED, LogDevice.of(device), message = e.toString())
             }
         }
     }
@@ -75,7 +80,7 @@ object CompanionPresence {
      * the association and observing it by its id.
      */
     @RequiresApi(36)
-    private fun setObservingById(context: Context, device: BluetoothDevice, observe: Boolean) {
+    private fun setObservingById(context: Context, device: BluetoothDevice, observe: Boolean, logChange: Boolean) {
         val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
         for (association in PermissionUtil.findAssociations(context, device)) {
             val request = ObservingDevicePresenceRequest.Builder().setAssociationId(association.id).build()
@@ -85,11 +90,19 @@ object CompanionPresence {
                 else
                     companionManager.stopObservingDevicePresence(request)
                 Log.d(TAG, (if (observe) "observing" else "not observing") + " presence of association ${association.id}")
+                if (logChange)
+                    logObserving(context, device, observe)
             } catch (e: IllegalArgumentException) {
                 // The association was removed meanwhile
                 Log.w(TAG, "can't change observing association ${association.id}", e)
+                EventLog.get(context).log(EventType.OBSERVING_FAILED, LogDevice.of(device), message = e.toString())
             }
         }
+    }
+
+    private fun logObserving(context: Context, device: BluetoothDevice, observe: Boolean) {
+        EventLog.get(context).log(EventType.OBSERVING_CHANGED, LogDevice.of(device),
+            message = if (observe) "observing presence" else "not observing presence")
     }
 
     /**

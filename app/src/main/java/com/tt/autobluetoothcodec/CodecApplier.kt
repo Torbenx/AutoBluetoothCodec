@@ -16,12 +16,14 @@ import androidx.annotation.RequiresPermission
  * Applies the preferred codec to connected devices and checks that it took effect, trying again a
  * few times if it didn't. Must be used on the main thread. [onIdle] is called whenever no device is
  * pending anymore; the owner calls [close] once it doesn't need the applier anymore.
+ *
+ * Each [apply] continues an operation of the [EventLog] and resolves it.
  */
 class CodecApplier(context: Context, private val onIdle: () -> Unit) : BluetoothProfile.ServiceListener {
     companion object {
         private const val TAG = "CodecApplier"
         private const val VERIFY_DELAY_MILLIS: Long = 500
-        private const val MAX_ATTEMPT_COUNT: Long = 5
+        private const val MAX_ATTEMPT_COUNT = 5
     }
 
     // A BroadcastReceiver's context isn't allowed to bind services, which the profile proxy does
@@ -35,19 +37,22 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
     private var pendingDevices = ArrayList<PendingDevice>()
 
     /** Applies the preferred codec of [device], which is dropped if A2DP isn't connected to it. */
-    fun apply(device: BluetoothDevice) {
-        if (closed)
+    fun apply(device: BluetoothDevice, operation: EventLog.Operation) {
+        if (closed) {
+            operation.resolve(EventType.CANCELLED, message = "applier closed")
             return
+        }
         val config = PreferredCodecStore.get(context, device)
+        val pending = pendingDevices.firstOrNull { it.device == device }
         if (!PermissionUtil.testPermission(context)) {
-            Log.i(TAG, "insufficient permissions to apply the codec of ${device.address}")
+            operation.resolve(EventType.NO_PERMISSION)
         } else if (config == null) {
-            Log.i(TAG, "device ${device.address} has no preferred codec")
-        } else if (pendingDevices.any { it.device == device }) {
-            Log.d(TAG, "device ${device.address} is already pending")
+            operation.resolve(EventType.NO_PREFERRED_CODEC)
+        } else if (pending != null) {
+            operation.resolve(EventType.ALREADY_PENDING, message = "pending in operation ${pending.operation.uid}")
             return
         } else {
-            pendingDevices.add(PendingDevice(device, config))
+            pendingDevices.add(PendingDevice(device, config, operation))
             if (a2dpProfile != null)
                 processPendingDevices()
             else
@@ -58,23 +63,35 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
             onIdle()
     }
 
-    fun cancel(device: BluetoothDevice) {
-        if (!pendingDevices.removeAll { it.device == device })
+    fun cancel(device: BluetoothDevice, message: String) {
+        val cancelled = pendingDevices.filter { it.device == device }
+        if (cancelled.isEmpty())
             return
+        pendingDevices.removeAll(cancelled.toSet())
+        for (item in cancelled)
+            item.operation.resolve(EventType.CANCELLED, message = message)
         if (pendingDevices.isEmpty()) {
             handler.removeCallbacks(processRunnable)
             onIdle()
         }
     }
 
-    fun close() {
+    /** Resolves the operations of the devices still pending with [resolution]. */
+    fun close(resolution: EventType = EventType.CANCELLED) {
         if (closed)
             return
         closed = true
         handler.removeCallbacks(processRunnable)
-        pendingDevices.clear()
+        dropPendingDevices(resolution, "applier closed")
         a2dpProfile?.let { closeProfileProxy(it) }
         a2dpProfile = null
+    }
+
+    private fun dropPendingDevices(resolution: EventType, message: String?) {
+        val dropped = pendingDevices
+        pendingDevices = ArrayList()
+        for (item in dropped)
+            item.operation.resolve(resolution, attempt = item.attemptCount, message = message)
     }
 
     private fun connectProfile() {
@@ -83,8 +100,7 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
         val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
         profileRequested = adapter?.getProfileProxy(context, this, BluetoothProfile.A2DP) ?: false
         if (!profileRequested) {
-            Log.i(TAG, "A2DP profile unavailable, dropping ${pendingDevices.size} pending devices")
-            pendingDevices.clear()
+            dropPendingDevices(EventType.PROFILE_UNAVAILABLE, null)
             onIdle()
         }
     }
@@ -108,8 +124,7 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
         profileRequested = false
         handler.removeCallbacks(processRunnable)
         if (pendingDevices.isNotEmpty()) {
-            Log.i(TAG, "A2DP disconnected while devices were pending")
-            pendingDevices.clear()
+            dropPendingDevices(EventType.PROFILE_DISCONNECTED, null)
             onIdle()
         }
     }
@@ -122,47 +137,49 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
         val pendingDevicesCopy = pendingDevices
         pendingDevices = ArrayList()
         for (item in pendingDevicesCopy) {
+            val operation = item.operation
+            val target = LogCodecConfig.of(item.targetConfig)
             try {
                 if (now - item.lastApplyAttempt < VERIFY_DELAY_MILLIS) {
                     pendingDevices.add(item)
                     continue
                 }
                 if (profile.getConnectionState(item.device) != BluetoothProfile.STATE_CONNECTED) {
-                    Log.i(TAG, "device ${item.device.name} not connected according to profile")
+                    operation.resolve(EventType.NOT_CONNECTED, attempt = item.attemptCount)
                     continue
                 }
 
                 if (PermissionUtil.isAssociationRequired(context, item.device)) {
-                    Log.i(TAG, "no companion association for ${item.device.name}, can't change its codec")
+                    operation.resolve(EventType.NO_ASSOCIATION)
                     continue
                 }
 
+                var actual: LogCodecConfig? = null
                 if (item.attemptCount > 0) {
-                    val actualConfig = A2dpProfileUtil.getCurrentCodecConfig(profile, item.device)
-                    val actualCodecConfig = actualConfig?.let { CodecConfig.fromAndroid(it) }
-                    if (actualCodecConfig == item.targetConfig) {
-                        Log.i(TAG, "Codec applied correctly on ${item.device.name}")
+                    actual = A2dpProfileUtil.getCurrentCodecConfig(profile, item.device)?.let { LogCodecConfig.of(it) }
+                    operation.log(EventType.GET_CODEC_CONFIG, config = target, actual = actual, attempt = item.attemptCount)
+                    if (actual?.own == item.targetConfig) {
+                        operation.resolve(EventType.CODEC_VERIFIED, actual = actual, attempt = item.attemptCount)
                         continue
                     }
-                    Log.i(TAG, "Codec did not apply correctly on ${item.device.name}, trying it again")
-                    Log.d(TAG, "Target: ${item.targetConfig.toAndroid()}")
-                    Log.d(TAG, "Actual: $actualConfig")
                 }
 
                 if (item.attemptCount >= MAX_ATTEMPT_COUNT) {
-                    Log.i(TAG, "Exceeded maximum number of attempts for ${item.device.name}")
+                    operation.resolve(EventType.MAX_ATTEMPTS, config = target, actual = actual, attempt = item.attemptCount)
                     continue
                 }
 
-                Log.i(TAG, "Apply attempt ${item.attemptCount + 1} on ${item.device.name}")
-                A2dpProfileUtil.setCodecConfig(profile, item.device, item.targetConfig.toAndroid())
                 item.attemptCount += 1
+                operation.log(EventType.SET_CODEC_CONFIG, config = target, attempt = item.attemptCount)
+                A2dpProfileUtil.setCodecConfig(profile, item.device, item.targetConfig.toAndroid())
                 item.lastApplyAttempt = now
                 pendingDevices.add(item)
             } catch (e: SecurityException) {
-                Log.i(TAG, "Bluetooth refused codec access for ${item.device.name}", e)
+                Log.d(TAG, "Bluetooth refused codec access", e)
+                operation.resolve(EventType.SECURITY_EXCEPTION, attempt = item.attemptCount, message = e.toString())
             } catch (e: Throwable) {
-                Log.i(TAG, "codec change for ${item.device.name} ran into exception", e)
+                Log.d(TAG, "codec change ran into exception", e)
+                operation.resolve(EventType.ERROR, attempt = item.attemptCount, message = e.toString())
             }
         }
         if (pendingDevices.isEmpty()) {
@@ -176,6 +193,7 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
     private data class PendingDevice(
         val device: BluetoothDevice,
         val targetConfig: CodecConfig,
+        val operation: EventLog.Operation,
         var lastApplyAttempt: Long = 0,
-        var attemptCount: Long = 0)
+        var attemptCount: Int = 0)
 }
