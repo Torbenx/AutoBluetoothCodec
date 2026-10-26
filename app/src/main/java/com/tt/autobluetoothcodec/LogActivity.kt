@@ -71,8 +71,8 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 /**
- * Shows the [EventLog], newest first. An operation is shown as one entry, the [DetailLevel] decides
- * whether its events are listed, and in the debug level each event can be expanded to its JSON.
+ * Shows the [EventLog], newest first. An operation is shown as one entry. The summary shows it as one
+ * line, the detailed level lists all its events, each of which can be expanded to its JSON.
  */
 class LogActivity : ComponentActivity() {
     companion object {
@@ -262,7 +262,7 @@ class LogActivity : ComponentActivity() {
     @Composable
     private fun EventRow(event: LogEvent, suffix: String = "") {
         var expanded by remember(event.seq) { mutableStateOf(false) }
-        val expandable = detailLevel == DetailLevel.DEBUG
+        val expandable = detailLevel == DetailLevel.DETAILED
         Column(
             Modifier
                 .fillMaxWidth()
@@ -324,13 +324,10 @@ class LogActivity : ComponentActivity() {
             } else if (detailLevel == DetailLevel.SUMMARY) {
                 OperationSummary(entry)
             } else {
-                // The trigger and the resolution frame the operation, so they are always listed
                 val resolution = entry.resolution
                 val duration = describeDuration(entry)?.let { " ($it)" } ?: ""
-                for (event in entry.events) {
-                    if (event.type.flow != OperationFlow.ELEMENT || event.type.level <= detailLevel)
-                        EventRow(event, if (event === resolution) duration else "")
-                }
+                for (event in entry.events)
+                    EventRow(event, if (event === resolution) duration else "")
             }
         }
     }
@@ -378,7 +375,6 @@ class LogActivity : ComponentActivity() {
                     Text(when (level) {
                         DetailLevel.SUMMARY -> "Summary"
                         DetailLevel.DETAILED -> "Detailed"
-                        DetailLevel.DEBUG -> "Debug"
                     })
                 }
             }

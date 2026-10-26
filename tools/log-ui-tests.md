@@ -11,7 +11,7 @@ this file records the procedure and the results so they can be repeated.
 | Phone | Pixel 3a (`sargo`), serial `0000000028`, patched with [test-device-images](test-device-images/README.md) |
 | Android | 9 (API 28), UTC, clock set to 2019-06-20 |
 | Screen | 1080 × 2220 px, light theme, default font size |
-| Build | debug, from commit `7c4faa8` (smoke tests), the commit that added this file (sample log tests) and the commit that renamed `VALIDATE_CODEC_CONFIG` (retest after review) |
+| Build | debug, from commit `7c4faa8` (smoke tests), the commit that added this file (sample log tests) and the commit that renamed `VALIDATE_CODEC_CONFIG` (retest after review) and the commit that removed the debug level (retest of the levels) |
 | Bluetooth | no audio device connected |
 
 The tap coordinates below are for this screen size. On another phone, find
@@ -30,7 +30,7 @@ adb exec-out cat /sdcard/ui.xml
 | Main screen overflow menu (⋮) | `1003 154` |
 | Overflow menu item "Log" | `827 308` |
 | Log screen: Share | `871 154` |
-| Log screen: Summary / Detailed / Debug | `209 330` / `540 330` / `870 330` |
+| Log screen: Summary / Detailed | `293 330` / `787 330` |
 | Share dialog: Share button | `831 1418` |
 
 Screenshots were taken with `adb exec-out screencap -p > page.png`, scrolling
@@ -75,12 +75,13 @@ Tap the overflow menu, then "Log".
 detail level selection, a "Today" header and the label as "Test: smoke_test".
 **Result:** pass.
 
-### 1.4 Debug level and JSON
+### 1.4 Event JSON
 
-Tap "Debug", then the label's row.
+Tap "Detailed", then the label's row.
 
-**Expected:** Debug is selected and the row expands to the event's JSON.
-**Result:** pass.
+**Expected:** Detailed is selected and the row expands to the event's JSON.
+**Result:** pass. This first ran with a separate debug level, which had the
+JSON then; it was checked again on the detailed level in 2.3.
 
 ### 1.5 Share dialog
 
@@ -158,8 +159,9 @@ Tap "Summary" and screenshot every page from the top.
 - Day headers "Today", "Yesterday" and a full date, newest first.
 - One line per operation, "trigger → resolution (duration)", and standalone
   events like test labels and permission changes on their own.
-- Detailed-level operations, like a device appearing before audio connects,
-  are hidden.
+- Detailed-level events are hidden, like a device appearing before audio
+  connects, "Couldn't read the codec" and the presence observing changes.
+  Tapping a row doesn't expand it.
 - Failed outcomes in the error color.
 - The device name above each entry, or its address if it has no name.
 - An `ERROR` resolution shows its message under the summary line.
@@ -171,7 +173,8 @@ after the fixes.
 
 ### 2.3 Detailed level
 
-Tap "Detailed" and screenshot every page.
+Tap "Detailed" and screenshot every page, then tap a "Setting codec" or
+"Codec not applied yet" row.
 
 **Expected:**
 - Operations list their trigger, elements and resolution, without a summary
@@ -182,18 +185,7 @@ Tap "Detailed" and screenshot every page.
   "Codec not applied yet, active: …", ones that match "Codec validated: …".
   Running out of attempts says which codec stayed.
 - Numbers stay on one line with their units, for example "48 kHz".
-- Debug-level events are hidden.
-
-**Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
-after the fixes.
-
-### 2.4 Debug level
-
-Tap "Debug", screenshot every page, then tap a "Setting codec" or "Codec not
-applied yet" row.
-
-**Expected:**
-- The debug-level events appear: "Already in progress" with the uid of the
+- Every event appears, including "Already in progress" with the uid of the
   pending operation, "Couldn't read the codec" and the presence observing
   changes.
 - Tapping a row expands its JSON with a 2 space indent, scrolling sideways
@@ -201,19 +193,21 @@ applied yet" row.
   model, for example `"type": "LDAC"`, `"sampleRate": 96000`,
   `"bitrate": "ADAPTIVE"`.
 
-**Result:** first run failed, the JSON wrapped inside strings. Passed after
-the fix.
+**Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
+after the fixes.
 
-### 2.5 Detail level is remembered
+### 2.4 Detail level is remembered
 
 Leave the log screen at a level, force-stop the app and open the log screen
 again.
 
 **Expected:** it opens at the level last chosen.
-**Result:** pass, it opened at Debug, the level chosen before, after both
-reloads where that was checked.
+**Result:** pass. Before the debug level was removed it opened at Debug after
+both reloads where that was checked, afterwards at Detailed, the level chosen
+before. A level saved by an older build that no longer exists falls back to
+Summary; that wasn't checked on the phone.
 
-### 2.6 Anonymised export of the sample
+### 2.5 Anonymised export of the sample
 
 On the log screen, tap Share, then Share with "Anonymised" selected, and go
 back from the share sheet. Read the exported file:
@@ -272,6 +266,11 @@ A review of the screenshots found these, fixed in the commit that renamed
 | Detailed, Debug | `GET_CODEC_CONFIG` didn't say what the read was for | Renamed to `VALIDATE_CODEC_CONFIG`, reads "Codec validated: …" or "Codec not applied yet, active: …" |
 | Detailed | `CODEC_CHANGE_OBSERVED` didn't say who observed it, and "Codec changed to …" suggested the change happened then | Renamed to `ACTIVITY_OBSERVED_CODEC_CHANGE`, reads "App observed a different active codec: …" |
 | Detailed, Debug | Lines broke between a number and its unit, "48 / kHz" | Non-breaking spaces before kHz and kbps |
+
+The debug level only differed from the detailed level by two event types and
+the JSON view. It was removed in a later commit: its events and the JSON view
+moved to the detailed level. Tests 2.2 to 2.4 were run again afterwards and
+passed.
 
 ## Not covered
 

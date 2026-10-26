@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
 enum class OperationFlow { TRIGGER, ELEMENT, RESOLUTION, STANDALONE }
 
 /** The least detailed view of the log that shows an event. */
-enum class DetailLevel { SUMMARY, DETAILED, DEBUG }
+enum class DetailLevel { SUMMARY, DETAILED }
 
 enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
     // A device appeared to CodecCompanionService, its preferred codec is applied
@@ -46,7 +46,7 @@ enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
     TIMEOUT(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
     CANCELLED(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
     // The device is already pending in another operation, the message names it
-    ALREADY_PENDING(OperationFlow.RESOLUTION, DetailLevel.DEBUG),
+    ALREADY_PENDING(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
     ERROR(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
     // Added by EventLog for operations a previous process didn't resolve. That process ended,
     // but why isn't known: it may have crashed, been force-stopped or been killed by the system
@@ -56,11 +56,11 @@ enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
     // MainActivity read a codec that differs from the last one known for the device. When the
     // codec changed isn't known, only that it changed since the last known one was logged
     ACTIVITY_OBSERVED_CODEC_CHANGE(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    READ_FAILED(OperationFlow.STANDALONE, DetailLevel.DEBUG),
+    READ_FAILED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
     PREFERRED_DELETED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
     DEVICE_UNLINKED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
     PERMISSION_CHANGED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    OBSERVING_CHANGED(OperationFlow.STANDALONE, DetailLevel.DEBUG),
+    OBSERVING_CHANGED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
     OBSERVING_FAILED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
     // Sent by tests to mark where a test step starts, the message is the label
     TEST_LABEL(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
