@@ -2,8 +2,22 @@ package com.tt.autobluetoothcodec
 
 import android.bluetooth.BluetoothCodecConfig
 import androidx.annotation.IntDef
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 
-abstract class CodecConfig : Cloneable {
+/**
+ * The app's model of a codec configuration. It's serialized with readable values, for example the
+ * sample rate in Hz, and the codec as type discriminator. Values without a readable form are
+ * written as described by their serializer, the [AndroidCodecConfig] keeps the exact values.
+ */
+@Serializable
+sealed class CodecConfig : Cloneable {
     @IntDef(
         value = [
             CODEC_TYPE_INVALID,
@@ -163,13 +177,29 @@ abstract class CodecConfig : Cloneable {
         return toAndroid().hashCode()
     }
 
+    /** For example "LDAC, 96.0 kHz, 24 bits/sample". */
+    fun describe(): String {
+        val codec = getCodecName(getCodecType()) ?: "unknown codec"
+        val sampleRate = getSampleRate(sampleRate)
+            ?.div(1000.0)?.toString()?.plus(" kHz")
+            ?: "unknown sample rate"
+        val bitsPerSample = getBitsPerSample(bitsPerSample)
+            ?.toString()?.plus(" bits/sample")
+            ?: "unknown sample size"
+        return "$codec, $sampleRate, $bitsPerSample"
+    }
+
+    @Serializable(with = SampleRateSerializer::class)
     @SampleRate
     var sampleRate: Int = SAMPLE_RATE_NONE
 
+    @Serializable(with = BitsPerSampleSerializer::class)
     @BitsPerSample
     var bitsPerSample: Int = BITS_PER_SAMPLE_NONE
 }
 
+/** The codec configuration as the Bluetooth stack represents it, see [A2dpProfileUtil]. */
+@Serializable
 data class AndroidCodecConfig(
     @CodecConfig.CodecType
     val codecType: Int = CodecConfig.CODEC_TYPE_INVALID,
@@ -186,12 +216,16 @@ data class AndroidCodecConfig(
     val codecSpecific4: Int = 0
 )
 
+@Serializable
+@SerialName("SBC")
 class SBCCodecConfig: CodecConfig() {
     override fun getCodecType(): Int {
         return CODEC_TYPE_SBC
     }
 }
 
+@Serializable
+@SerialName("AAC")
 class AACCodecConfig: CodecConfig() {
     companion object {
         @IntDef(
@@ -237,10 +271,13 @@ class AACCodecConfig: CodecConfig() {
         }
     }
 
+    @Serializable(with = AacVariableBitrateSerializer::class)
     @VariableBitrate
     var variableBitrate = VARIABLE_BITRATE_SYSTEM_DEFAULT
 }
 
+@Serializable
+@SerialName("LDAC")
 class LDACCodecConfig: CodecConfig() {
     @IntDef(
         value = [
@@ -311,21 +348,29 @@ class LDACCodecConfig: CodecConfig() {
         }
     }
 
+    @Serializable(with = LdacBitrateSerializer::class)
     @Bitrate
     var bitrate = BITRATE_SYSTEM_DEFAULT
 }
 
+@Serializable
+@SerialName("APTX")
 class AptXCodecConfig: CodecConfig() {
     override fun getCodecType(): Int {
         return CODEC_TYPE_APTX
     }
 }
+
+@Serializable
+@SerialName("APTX_HD")
 class AptXHDCodecConfig: CodecConfig() {
     override fun getCodecType(): Int {
         return CODEC_TYPE_APTX_HD
     }
 }
 
+@Serializable
+@SerialName("OPUS")
 class OpusCodecConfig: CodecConfig() {
     companion object {
         // The encode complexity is define by a number between 0 and 10 inclusive
@@ -364,3 +409,79 @@ class OpusCodecConfig: CodecConfig() {
     @EncodeComplexity
     var encodeComplexity = ENCODE_COMPLEXITY_SYSTEM_DEFAULT
 }
+
+/**
+ * Writes the sample rate in Hz. A value unknown to the app is written as 0 and read back as
+ * [CodecConfig.SAMPLE_RATE_NONE].
+ */
+object SampleRateSerializer : KSerializer<Int> {
+    override val descriptor = PrimitiveSerialDescriptor("com.tt.autobluetoothcodec.SampleRate", PrimitiveKind.INT)
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(CodecConfig.getSampleRate(value) ?: 0)
+    }
+
+    override fun deserialize(decoder: Decoder): Int {
+        val hertz = decoder.decodeInt()
+        return CodecConfig.SAMPLE_RATES.firstOrNull { CodecConfig.getSampleRate(it) == hertz }
+            ?: CodecConfig.SAMPLE_RATE_NONE
+    }
+}
+
+/**
+ * Writes the number of bits per sample. A value unknown to the app is written as 0 and read back as
+ * [CodecConfig.BITS_PER_SAMPLE_NONE].
+ */
+object BitsPerSampleSerializer : KSerializer<Int> {
+    override val descriptor = PrimitiveSerialDescriptor("com.tt.autobluetoothcodec.BitsPerSample", PrimitiveKind.INT)
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeInt(CodecConfig.getBitsPerSample(value) ?: 0)
+    }
+
+    override fun deserialize(decoder: Decoder): Int {
+        val bits = decoder.decodeInt()
+        return CodecConfig.SAMPLE_SIZES.firstOrNull { CodecConfig.getBitsPerSample(it) == bits }
+            ?: CodecConfig.BITS_PER_SAMPLE_NONE
+    }
+}
+
+/** Writes an int constant by its name, a value without a name is written as its number. */
+abstract class ConstantNameSerializer(serialName: String, private val names: Map<Int, String>) : KSerializer<Int> {
+    override val descriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: Int) {
+        encoder.encodeString(names[value] ?: value.toString())
+    }
+
+    override fun deserialize(decoder: Decoder): Int {
+        val text = decoder.decodeString()
+        return names.entries.firstOrNull { it.value == text }?.key
+            ?: text.toIntOrNull()
+            ?: throw SerializationException("unknown value $text of ${descriptor.serialName}")
+    }
+}
+
+object LdacBitrateSerializer : ConstantNameSerializer(
+    "com.tt.autobluetoothcodec.LdacBitrate",
+    mapOf(
+        LDACCodecConfig.BITRATE_SYSTEM_DEFAULT to "SYSTEM_DEFAULT",
+        LDACCodecConfig.BITRATE_ADAPTIVE to "ADAPTIVE",
+        LDACCodecConfig.BITRATE_LOW to "LOW",
+        LDACCodecConfig.BITRATE_MID to "MID",
+        LDACCodecConfig.BITRATE_HIGH to "HIGH"
+    )
+)
+
+object AacVariableBitrateSerializer : ConstantNameSerializer(
+    "com.tt.autobluetoothcodec.AacVariableBitrate",
+    mapOf(
+        AACCodecConfig.VARIABLE_BITRATE_SYSTEM_DEFAULT to "SYSTEM_DEFAULT",
+        AACCodecConfig.VARIABLE_BITRATE_DISABLED to "DISABLED",
+        AACCodecConfig.VARIABLE_BITRATE_VERY_LOW to "VERY_LOW",
+        AACCodecConfig.VARIABLE_BITRATE_LOW to "LOW",
+        AACCodecConfig.VARIABLE_BITRATE_MEDIUM to "MEDIUM",
+        AACCodecConfig.VARIABLE_BITRATE_HIGH to "HIGH",
+        AACCodecConfig.VARIABLE_BITRATE_VERY_HIGH to "VERY_HIGH"
+    )
+)
