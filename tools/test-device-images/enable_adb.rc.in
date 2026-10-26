@@ -1,0 +1,35 @@
+on post-fs-data
+    # Create /data/adb and /data/misc/adb like init.usb.rc does. Its post-fs-data block runs after
+    # this one, so on the first boot after a wipe both are missing here. A /data/adb created by sh
+    # below has no encryption policy; init.usb.rc then fails to set one and reboots into recovery.
+    # Without an encryption= option, Android 12 infers encryption=Require; Android 9 rejects it
+    mkdir /data/adb 0700 root root
+    mkdir /data/misc/adb 02750 system shell
+    # Set up /data/adb/magisk with busybox, which the Magisk app does otherwise. Without it, Magisk
+    # aborts post-fs-data and on Android 11+ never adds magisk and su to /system/bin. This runs
+    # before Magisk's own post-fs-data. magiskinit replaces ${MAGISKTMP} with Magisk's folder
+    exec u:r:magisk:s0 root root -- /system/bin/sh -c "mkdir -p /data/adb/magisk; cp ${MAGISKTMP}/busybox /data/adb/magisk/busybox; chmod 0755 /data/adb/magisk/busybox"
+    # Add ADB keys. gen_enable_adb_rc.py replaces the next line with one line per key in adbkeys
+    @ADB_KEYS@
+    # Setup correct adb_keys file properties
+    exec u:r:magisk:s0 root root -- /system/bin/sh -c "chown system:shell /data/misc/adb/adb_keys; chmod 0640 /data/misc/adb/adb_keys; restorecon /data/misc/adb/adb_keys"
+    # Configure USB mode
+    setprop persist.sys.usb.config mtp,adb
+
+on property:sys.boot_completed=1
+    # Enable adb
+    exec u:r:magisk:s0 root root -- /system/bin/settings put global adb_enabled 1
+    # Configure USB mode again to ensure the mode is correct on the first boot
+    setprop sys.usb.config mtp,adb
+    # Restart adb daemon to apply settings
+    restart adbd
+    # Disable lockscreen
+    exec u:r:magisk:s0 root root -- /system/bin/locksettings set-disabled true
+    # Keep screen on forever while plugged in
+    exec u:r:magisk:s0 root root -- /system/bin/settings put global stay_on_while_plugged_in 7
+    # Skip the setup wizard after a wipe
+    exec u:r:magisk:s0 root root -- /system/bin/settings put global device_provisioned 1
+    exec u:r:magisk:s0 root root -- /system/bin/settings put secure user_setup_complete 1
+    exec u:r:magisk:s0 root root -- /system/bin/pm disable com.google.android.setupwizard
+    # Grant su to the adb shell (uid 2000) without the Magisk app
+    exec u:r:magisk:s0 root root -- /system/bin/sh -c "${MAGISKTMP}/magisk --sqlite 'REPLACE INTO policies (uid,policy,until,logging,notification) VALUES(2000,2,0,0,0)'"
