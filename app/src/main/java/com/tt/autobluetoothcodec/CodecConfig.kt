@@ -177,17 +177,20 @@ sealed class CodecConfig : Cloneable {
         return toAndroid().hashCode()
     }
 
-    /** For example "LDAC, 96.0 kHz, 24 bits/sample". */
+    /** For example "LDAC, 96 kHz, 24-bit, adaptive bitrate". */
     fun describe(): String {
         val codec = getCodecName(getCodecType()) ?: "unknown codec"
         val sampleRate = getSampleRate(sampleRate)
-            ?.div(1000.0)?.toString()?.plus(" kHz")
+            ?.let { if (it % 1000 == 0) "${it / 1000} kHz" else "${it / 1000.0} kHz" }
             ?: "unknown sample rate"
         val bitsPerSample = getBitsPerSample(bitsPerSample)
-            ?.toString()?.plus(" bits/sample")
+            ?.let { "$it-bit" }
             ?: "unknown sample size"
-        return "$codec, $sampleRate, $bitsPerSample"
+        return (listOf(codec, sampleRate, bitsPerSample) + describeOptions()).joinToString(", ")
     }
+
+    /** Describes the codec specific options that differ from the system default. */
+    protected open fun describeOptions(): List<String> = emptyList()
 
     @Serializable(with = SampleRateSerializer::class)
     @SampleRate
@@ -271,6 +274,18 @@ class AACCodecConfig: CodecConfig() {
         }
     }
 
+    override fun describeOptions(): List<String> {
+        return when (variableBitrate) {
+            VARIABLE_BITRATE_DISABLED -> listOf("VBR off")
+            VARIABLE_BITRATE_VERY_LOW -> listOf("VBR very low")
+            VARIABLE_BITRATE_LOW -> listOf("VBR low")
+            VARIABLE_BITRATE_MEDIUM -> listOf("VBR medium")
+            VARIABLE_BITRATE_HIGH -> listOf("VBR high")
+            VARIABLE_BITRATE_VERY_HIGH -> listOf("VBR very high")
+            else -> emptyList()
+        }
+    }
+
     @Serializable(with = AacVariableBitrateSerializer::class)
     @VariableBitrate
     var variableBitrate = VARIABLE_BITRATE_SYSTEM_DEFAULT
@@ -348,6 +363,15 @@ class LDACCodecConfig: CodecConfig() {
         }
     }
 
+    override fun describeOptions(): List<String> {
+        return when (bitrate) {
+            BITRATE_SYSTEM_DEFAULT -> emptyList()
+            BITRATE_ADAPTIVE -> listOf("adaptive bitrate")
+            else -> listOfNotNull(getFixedBitrate(bitrate, sampleRate)?.let { "$it kbps" }
+                ?: getFixedBitrate(bitrate)?.let { "${it.first}/${it.second} kbps" })
+        }
+    }
+
     @Serializable(with = LdacBitrateSerializer::class)
     @Bitrate
     var bitrate = BITRATE_SYSTEM_DEFAULT
@@ -404,6 +428,12 @@ class OpusCodecConfig: CodecConfig() {
         } else {
             encodeComplexity = config.codecSpecific3 % 10
         }
+    }
+
+    override fun describeOptions(): List<String> {
+        if (encodeComplexity == ENCODE_COMPLEXITY_SYSTEM_DEFAULT)
+            return emptyList()
+        return listOf("complexity $encodeComplexity")
     }
 
     @EncodeComplexity

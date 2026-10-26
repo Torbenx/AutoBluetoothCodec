@@ -112,5 +112,5 @@ data class LogCodecConfig(val android: AndroidCodecConfig, val own: CodecConfig?
         fun of(config: CodecConfig) = LogCodecConfig(config.toAndroid(), config.clone() as CodecConfig)
     }
 
-    fun describe(): String = own?.describe() ?: "unknown codec ${android.codecType}"
+    fun describe(): String = own?.describe() ?: "unknown codec (type ${android.codecType})"
 }

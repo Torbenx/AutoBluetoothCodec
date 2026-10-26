@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
@@ -57,6 +59,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -102,7 +105,11 @@ class LogActivity : ComponentActivity() {
     }
 
     private val log by lazy { EventLog.get(this) }
-    private val prettyJson = Json(from = EventLog.json) { prettyPrint = true }
+    @OptIn(ExperimentalSerializationApi::class)
+    private val prettyJson = Json(from = EventLog.json) {
+        prettyPrint = true
+        prettyPrintIndent = "  "
+    }
     private val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
     private val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
@@ -178,14 +185,16 @@ class LogActivity : ComponentActivity() {
             EventType.USER_SAVE_PREFERRED -> "Saving preferred codec: $config"
             EventType.USER_LINK_DEVICE -> "Linking device"
             EventType.SET_CODEC_CONFIG -> "Setting codec" + (event.attempt?.let { ", attempt $it" } ?: "") + ": $config"
-            EventType.GET_CODEC_CONFIG -> "Read codec: $actual"
+            EventType.GET_CODEC_CONFIG -> "Read codec: $actual" +
+                    (if (event.actual?.own != event.config?.own) ", not the target" else "")
             EventType.ASSOCIATION_REQUESTED -> "Asked to link the device"
             EventType.CODEC_VERIFIED -> "Codec applied: $actual"
             EventType.CODEC_SET_SENT -> "Codec change sent"
             EventType.PREFERRED_SAVED -> "Preferred codec saved"
             EventType.ASSOCIATION_CREATED -> "Device linked"
             EventType.ASSOCIATION_FAILED -> "Device wasn't linked"
-            EventType.MAX_ATTEMPTS -> "Codec not applied after ${event.attempt} attempts"
+            EventType.MAX_ATTEMPTS -> "Codec not applied after ${event.attempt} attempts" +
+                    (event.actual?.let { ", still ${it.describe()}" } ?: "")
             EventType.NOT_CONNECTED -> "Audio not connected yet"
             EventType.NO_ASSOCIATION -> "Device isn't linked, so the codec can't be changed"
             EventType.NO_PREFERRED_CODEC -> "No preferred codec"
@@ -210,11 +219,25 @@ class LogActivity : ComponentActivity() {
         }
     }
 
+    /** The time from the trigger to the resolution, null if it isn't worth showing. */
+    private fun describeDuration(entry: LogEntry): String? {
+        val resolution = entry.resolution ?: return null
+        // Resolved when the app started again, which says nothing about the operation
+        if (resolution.type == EventType.OPERATION_INTERRUPTED)
+            return null
+        val millis = resolution.time - entry.first.time
+        return when {
+            millis < 100 -> null
+            millis < 60_000 -> String.format(Locale.getDefault(), "%.1f s", millis / 1000.0)
+            millis < 3_600_000 -> "${millis / 60_000} min ${millis / 1000 % 60} s"
+            else -> "${millis / 3_600_000} h ${millis / 60_000 % 60} min"
+        }
+    }
+
     private fun describeOperation(entry: LogEntry): String {
         val trigger = describe(entry.first)
         val resolution = entry.resolution ?: return "$trigger → in progress"
-        val seconds = (resolution.time - entry.first.time) / 1000.0
-        return "$trigger → ${describe(resolution)} (${String.format(Locale.getDefault(), "%.1f", seconds)} s)"
+        return "$trigger → ${describe(resolution)}" + (describeDuration(entry)?.let { " ($it)" } ?: "")
     }
 
     private fun zoned(time: Long) = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault())
@@ -234,7 +257,7 @@ class LogActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun EventRow(event: LogEvent) {
+    private fun EventRow(event: LogEvent, suffix: String = "") {
         var expanded by remember(event.seq) { mutableStateOf(false) }
         val expandable = detailLevel == DetailLevel.DEBUG
         Column(
@@ -250,7 +273,7 @@ class LogActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.width(80.dp)
                 )
-                Text(describe(event), style = MaterialTheme.typography.bodyMedium, color = eventColor(event.type))
+                Text(describe(event) + suffix, style = MaterialTheme.typography.bodyMedium, color = eventColor(event.type))
             }
             val message = event.message
             if (message != null && event.type !in MESSAGE_DESCRIBED) {
@@ -262,11 +285,15 @@ class LogActivity : ComponentActivity() {
                 )
             }
             if (expandable && expanded) {
+                // Scrolls instead of wrapping, wrapped JSON is hard to read
                 Text(
                     prettyJson.encodeToString(event),
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.padding(start = 80.dp, top = 4.dp)
+                    softWrap = false,
+                    modifier = Modifier
+                        .padding(start = 80.dp, top = 4.dp)
+                        .horizontalScroll(rememberScrollState())
                 )
             }
         }
@@ -285,30 +312,45 @@ class LogActivity : ComponentActivity() {
             }
             if (!entry.isOperation) {
                 EventRow(entry.first)
-                return@Column
-            }
-            val resolutionType = entry.resolution?.type
-            Row {
-                Text(
-                    timeFormatter.format(zoned(entry.first.time)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(80.dp)
-                )
-                Text(
-                    describeOperation(entry),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (resolutionType != null) eventColor(resolutionType) else MaterialTheme.colorScheme.onSurface
-                )
-            }
-            if (detailLevel != DetailLevel.SUMMARY) {
-                Column(Modifier.padding(start = 16.dp, top = 4.dp)) {
-                    for (event in entry.events) {
-                        if (event.type.level <= detailLevel)
-                            EventRow(event)
-                    }
+            } else if (detailLevel == DetailLevel.SUMMARY) {
+                OperationSummary(entry)
+            } else {
+                // The trigger and the resolution frame the operation, so they are always listed
+                val resolution = entry.resolution
+                val duration = describeDuration(entry)?.let { " ($it)" } ?: ""
+                for (event in entry.events) {
+                    if (event.type.flow != OperationFlow.ELEMENT || event.type.level <= detailLevel)
+                        EventRow(event, if (event === resolution) duration else "")
                 }
             }
+        }
+    }
+
+    @Composable
+    private fun OperationSummary(entry: LogEntry) {
+        val resolution = entry.resolution
+        Row {
+            Text(
+                timeFormatter.format(zoned(entry.first.time)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(80.dp)
+            )
+            Text(
+                describeOperation(entry),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface
+            )
+        }
+        // "Failed" alone doesn't say what went wrong
+        val message = resolution?.message
+        if (resolution?.type == EventType.ERROR && message != null) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 80.dp)
+            )
         }
     }
 
