@@ -1,17 +1,19 @@
 1. Complete app features
 
    * Consider using CompanionDeviceService with startObservingDevicePresence instead of broadcast receiver. (Done)
-   * Target SDK version 36 (required for Play Store)
-   * Add Log.
+   * Target SDK version 36 (required for Play Store) (Done)
+   * Add Log. (Done)
      Log should accesible via the action bar probably.
      The history of the log should be limited to the last N events.
      When viewed in the UI the log should be show in a human friendly way with configurable level of detail.
      The Log should be stored in json and contain:
-     * Event type, either SetCodecConfig or GetCodecConfig or a UI/system trigger as well as error conditions
+     * Event type: SetCodecConfig, GetCodecConfig, UI/system events, error states (for example timeouts), test labels
      * Time information
      * Our own and the android model for the codec.
      * Target device
-     * Trigger of the event. For example Ui update, device connected, validate device config, ...+
+     * Trigger of the event. For example Ui update, device connected, validate device config, ...
+   * Profile Log Activity (Done)
+   * Setup testing using Mobly
    * Add open source licences somewhere
 
 2. Polish UI
@@ -22,7 +24,8 @@
      * The devices should probably be centered vertically
      * Validate the UI for different screen sizes
      * Show a fun placeholder graphic when no devices are connected
-   * Review other activities as necessary
+   * Improve LogActivity UI
+     * LogActivity share mode selection should come up from the bottom and have its UI improved
    * Design an App icon
 
 3. Prepare to publish
