@@ -11,7 +11,7 @@ this file records the procedure and the results so they can be repeated.
 | Phone | Pixel 3a (`sargo`), serial `0000000028`, patched with [test-device-images](test-device-images/README.md) |
 | Android | 9 (API 28), UTC, clock set to 2019-06-20 |
 | Screen | 1080 × 2220 px, light theme, default font size |
-| Build | debug, from commit `7c4faa8` (smoke tests) and `c19ed71` (sample log tests) |
+| Build | debug, from commit `7c4faa8` (smoke tests), the commit that added this file (sample log tests) and the commit that renamed `VALIDATE_CODEC_CONFIG` (retest after review) |
 | Bluetooth | no audio device connected |
 
 The tap coordinates below are for this screen size. On another phone, find
@@ -163,6 +163,8 @@ Tap "Summary" and screenshot every page from the top.
 - Failed outcomes in the error color.
 - The device name above each entry, or its address if it has no name.
 - An `ERROR` resolution shows its message under the summary line.
+- Each time shares its baseline with the first line of its text, on every
+  level.
 
 **Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
 after the fixes.
@@ -176,8 +178,10 @@ Tap "Detailed" and screenshot every page.
   line repeating them. The duration is on the resolution.
 - Event messages, like "companion service" or exception texts, are shown in a
   smaller line below the event.
-- The retry sequences show each attempt. Reads that don't match say "not the
-  target". Running out of attempts says which codec stayed.
+- The retry sequences show each attempt. Validations that don't match say
+  "Codec not applied yet, active: …", ones that match "Codec validated: …".
+  Running out of attempts says which codec stayed.
+- Numbers stay on one line with their units, for example "48 kHz".
 - Debug-level events are hidden.
 
 **Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
@@ -185,8 +189,8 @@ after the fixes.
 
 ### 2.4 Debug level
 
-Tap "Debug", screenshot every page, then tap a "Setting codec" or "Read codec"
-row.
+Tap "Debug", screenshot every page, then tap a "Setting codec" or "Codec not
+applied yet" row.
 
 **Expected:**
 - The debug-level events appear: "Already in progress" with the uid of the
@@ -243,7 +247,8 @@ one id like `device-KUHS`, and messages use the same ids and `[name removed]`.
 
 ## Issues found and fixed
 
-The first run of the sample log tests found these, fixed in `c19ed71`:
+The first run of the sample log tests found these, fixed in the commit that
+added this file:
 
 | Level | Issue | Fix |
 | --- | --- | --- |
@@ -256,6 +261,17 @@ The first run of the sample log tests found these, fixed in `c19ed71`:
 | Detailed, Debug | Reads didn't say whether they matched the target | "…, not the target" when they don't |
 | Detailed, Debug | Running out of attempts didn't say which codec stayed | "…, still LDAC, 48 kHz, 24-bit, 990 kbps" |
 | Debug | JSON used a 4 space indent and wrapped inside strings | 2 space indent, scrolls sideways |
+
+A review of the screenshots found these, fixed in the commit that renamed
+`VALIDATE_CODEC_CONFIG`. Tests 2.1 to 2.3 were run again afterwards and passed:
+
+| Level | Issue | Fix |
+| --- | --- | --- |
+| All | Times are smaller than the text and were top-aligned, so they didn't line up with the first line, hard to follow in runs of one-line events | Time and text share their first baseline |
+| All | "Interrupted, the app was closed" claimed a cause that isn't known, the app may have crashed or been force-stopped | "Never finished, the app stopped running first" |
+| Detailed, Debug | `GET_CODEC_CONFIG` didn't say what the read was for | Renamed to `VALIDATE_CODEC_CONFIG`, reads "Codec validated: …" or "Codec not applied yet, active: …" |
+| Detailed | `CODEC_CHANGE_OBSERVED` didn't say who observed it, and "Codec changed to …" suggested the change happened then | Renamed to `ACTIVITY_OBSERVED_CODEC_CHANGE`, reads "App observed a different active codec: …" |
+| Detailed, Debug | Lines broke between a number and its unit, "48 / kHz" | Non-breaking spaces before kHz and kbps |
 
 ## Not covered
 

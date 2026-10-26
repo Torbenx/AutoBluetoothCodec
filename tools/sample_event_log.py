@@ -117,7 +117,7 @@ class Builder:
 def build(now_ms, utc_offset_minutes):
     b = Builder(now_ms, utc_offset_minutes)
     set_ = "SET_CODEC_CONFIG"
-    get = "GET_CODEC_CONFIG"
+    get = "VALIDATE_CODEC_CONFIG"
 
     b.at(2, 8, 15)
     b.event("PERMISSION_CHANGED", message="granted")
@@ -177,7 +177,7 @@ def build(now_ms, utc_offset_minutes):
     b.at(0, 0, 5)
     b.event("TEST_LABEL", message="reconnect_test start")
     b.operation("USER_SET_CODEC", HEADPHONES, [(set_, 5, {"config": AAC})], ("CODEC_SET_SENT", 20, {}), config=AAC)
-    b.event("CODEC_CHANGE_OBSERVED", device=HEADPHONES, delay_ms=1000, actual=AAC)
+    b.event("ACTIVITY_OBSERVED_CODEC_CHANGE", device=HEADPHONES, delay_ms=1000, actual=AAC)
     b.operation("USER_SET_CODEC", DAC, [("ASSOCIATION_REQUESTED", 5, {})],
                 ("ASSOCIATION_FAILED", 8000, {"message": "association request already in progress"}), config=APTX_HD)
     b.operation("USER_SET_CODEC", HEADPHONES, [(set_, 5, {"config": OPUS})], ("ERROR", 20, {
@@ -195,7 +195,7 @@ def build(now_ms, utc_offset_minutes):
     b.event("DEVICE_UNLINKED", device=LC3_EARBUDS, delay_ms=10_000)
     b.event("READ_FAILED", device=LC3_EARBUDS, delay_ms=1000,
             message="java.lang.SecurityException: Need BLUETOOTH_PRIVILEGED permission")
-    b.event("CODEC_CHANGE_OBSERVED", device=LC3_EARBUDS, delay_ms=5000, actual=LC3)
+    b.event("ACTIVITY_OBSERVED_CODEC_CHANGE", device=LC3_EARBUDS, delay_ms=5000, actual=LC3)
     b.event("PERMISSION_CHANGED", delay_ms=60_000, message="permanently denied")
     # Left open on purpose, loading the log resolves it with OPERATION_INTERRUPTED
     b.operation("A2DP_CONNECTED", HEADPHONES, [(set_, 40, {"config": LDAC_96, "attempt": 1})],

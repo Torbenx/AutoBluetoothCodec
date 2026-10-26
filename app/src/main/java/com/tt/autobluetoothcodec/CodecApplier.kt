@@ -157,7 +157,7 @@ class CodecApplier(context: Context, private val onIdle: () -> Unit) : Bluetooth
                 var actual: LogCodecConfig? = null
                 if (item.attemptCount > 0) {
                     actual = A2dpProfileUtil.getCurrentCodecConfig(profile, item.device)?.let { LogCodecConfig.of(it) }
-                    operation.log(EventType.GET_CODEC_CONFIG, config = target, actual = actual, attempt = item.attemptCount)
+                    operation.log(EventType.VALIDATE_CODEC_CONFIG, config = target, actual = actual, attempt = item.attemptCount)
                     if (actual?.own == item.targetConfig) {
                         operation.resolve(EventType.CODEC_VERIFIED, actual = actual, attempt = item.attemptCount)
                         continue

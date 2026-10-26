@@ -424,7 +424,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         readFailures.remove(address)
         val config = data.androidCodecConfig ?: return
         if (config != log.lastKnownCodec(address))
-            log.log(EventType.CODEC_CHANGE_OBSERVED, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
+            log.log(EventType.ACTIVITY_OBSERVED_CODEC_CHANGE, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
     }
 
     private fun readDeviceData(profile: BluetoothA2dp, device: BluetoothDevice): DeviceData {

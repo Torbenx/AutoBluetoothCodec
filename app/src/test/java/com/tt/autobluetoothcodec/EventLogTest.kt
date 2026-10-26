@@ -14,7 +14,7 @@ class EventLogTest {
         val events = mutableListOf(
             event(EventType.A2DP_CONNECTED, uid),
             event(EventType.SET_CODEC_CONFIG, uid),
-            event(EventType.GET_CODEC_CONFIG, uid),
+            event(EventType.VALIDATE_CODEC_CONFIG, uid),
         )
         if (resolved)
             events.add(event(EventType.CODEC_VERIFIED, uid))

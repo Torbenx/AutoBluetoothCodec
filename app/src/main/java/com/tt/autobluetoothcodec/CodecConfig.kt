@@ -180,8 +180,9 @@ sealed class CodecConfig : Cloneable {
     /** For example "LDAC, 96 kHz, 24-bit, adaptive bitrate". */
     fun describe(): String {
         val codec = getCodecName(getCodecType()) ?: "unknown codec"
+        // Non-breaking spaces keep the numbers and their units on one line
         val sampleRate = getSampleRate(sampleRate)
-            ?.let { if (it % 1000 == 0) "${it / 1000} kHz" else "${it / 1000.0} kHz" }
+            ?.let { if (it % 1000 == 0) "${it / 1000}\u00a0kHz" else "${it / 1000.0}\u00a0kHz" }
             ?: "unknown sample rate"
         val bitsPerSample = getBitsPerSample(bitsPerSample)
             ?.let { "$it-bit" }
@@ -367,8 +368,8 @@ class LDACCodecConfig: CodecConfig() {
         return when (bitrate) {
             BITRATE_SYSTEM_DEFAULT -> emptyList()
             BITRATE_ADAPTIVE -> listOf("adaptive bitrate")
-            else -> listOfNotNull(getFixedBitrate(bitrate, sampleRate)?.let { "$it kbps" }
-                ?: getFixedBitrate(bitrate)?.let { "${it.first}/${it.second} kbps" })
+            else -> listOfNotNull(getFixedBitrate(bitrate, sampleRate)?.let { "$it\u00a0kbps" }
+                ?: getFixedBitrate(bitrate)?.let { "${it.first}/${it.second}\u00a0kbps" })
         }
     }
 

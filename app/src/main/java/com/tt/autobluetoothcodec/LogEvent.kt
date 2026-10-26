@@ -25,8 +25,9 @@ enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
 
     // config is the target configuration
     SET_CODEC_CONFIG(OperationFlow.ELEMENT, DetailLevel.DETAILED),
-    // config is the target configuration, actual what the Bluetooth stack reported
-    GET_CODEC_CONFIG(OperationFlow.ELEMENT, DetailLevel.DETAILED),
+    // Reads the codec back to check whether the target took effect. config is the target
+    // configuration, actual what the Bluetooth stack reported
+    VALIDATE_CODEC_CONFIG(OperationFlow.ELEMENT, DetailLevel.DETAILED),
     ASSOCIATION_REQUESTED(OperationFlow.ELEMENT, DetailLevel.DETAILED),
 
     CODEC_VERIFIED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
@@ -47,12 +48,14 @@ enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
     // The device is already pending in another operation, the message names it
     ALREADY_PENDING(OperationFlow.RESOLUTION, DetailLevel.DEBUG),
     ERROR(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    // Added by EventLog for operations a previous process didn't resolve
+    // Added by EventLog for operations a previous process didn't resolve. That process ended,
+    // but why isn't known: it may have crashed, been force-stopped or been killed by the system
     OPERATION_INTERRUPTED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
 
     DEVICE_DISAPPEARED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    // The UI read a codec that differs from the last one known for the device
-    CODEC_CHANGE_OBSERVED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
+    // MainActivity read a codec that differs from the last one known for the device. When the
+    // codec changed isn't known, only that it changed since the last known one was logged
+    ACTIVITY_OBSERVED_CODEC_CHANGE(OperationFlow.STANDALONE, DetailLevel.DETAILED),
     READ_FAILED(OperationFlow.STANDALONE, DetailLevel.DEBUG),
     PREFERRED_DELETED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
     DEVICE_UNLINKED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),

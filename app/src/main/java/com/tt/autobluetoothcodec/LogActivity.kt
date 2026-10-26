@@ -185,8 +185,11 @@ class LogActivity : ComponentActivity() {
             EventType.USER_SAVE_PREFERRED -> "Saving preferred codec: $config"
             EventType.USER_LINK_DEVICE -> "Linking device"
             EventType.SET_CODEC_CONFIG -> "Setting codec" + (event.attempt?.let { ", attempt $it" } ?: "") + ": $config"
-            EventType.GET_CODEC_CONFIG -> "Read codec: $actual" +
-                    (if (event.actual?.own != event.config?.own) ", not the target" else "")
+            EventType.VALIDATE_CODEC_CONFIG -> when {
+                event.actual == null -> "Codec not applied yet, no codec reported"
+                event.actual.own != event.config?.own -> "Codec not applied yet, active: $actual"
+                else -> "Codec validated: $actual"
+            }
             EventType.ASSOCIATION_REQUESTED -> "Asked to link the device"
             EventType.CODEC_VERIFIED -> "Codec applied: $actual"
             EventType.CODEC_SET_SENT -> "Codec change sent"
@@ -206,9 +209,9 @@ class LogActivity : ComponentActivity() {
             EventType.CANCELLED -> "Cancelled"
             EventType.ALREADY_PENDING -> "Already in progress"
             EventType.ERROR -> "Failed"
-            EventType.OPERATION_INTERRUPTED -> "Interrupted, the app was closed"
+            EventType.OPERATION_INTERRUPTED -> "Never finished, the app stopped running first"
             EventType.DEVICE_DISAPPEARED -> "Device disconnected"
-            EventType.CODEC_CHANGE_OBSERVED -> "Codec changed to $actual"
+            EventType.ACTIVITY_OBSERVED_CODEC_CHANGE -> "App observed a different active codec: $actual"
             EventType.READ_FAILED -> "Couldn't read the codec"
             EventType.PREFERRED_DELETED -> "Preferred codec deleted"
             EventType.DEVICE_UNLINKED -> "Device unlinked"
@@ -266,14 +269,20 @@ class LogActivity : ComponentActivity() {
                 .clickable(enabled = expandable) { expanded = !expanded }
                 .padding(vertical = 2.dp)
         ) {
+            // The time is smaller than the text, aligning their baselines keeps it on the first line
             Row {
                 Text(
                     timeFormatter.format(zoned(event.time)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(80.dp)
+                    modifier = Modifier.width(80.dp).alignByBaseline()
                 )
-                Text(describe(event) + suffix, style = MaterialTheme.typography.bodyMedium, color = eventColor(event.type))
+                Text(
+                    describe(event) + suffix,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = eventColor(event.type),
+                    modifier = Modifier.alignByBaseline()
+                )
             }
             val message = event.message
             if (message != null && event.type !in MESSAGE_DESCRIBED) {
@@ -334,12 +343,13 @@ class LogActivity : ComponentActivity() {
                 timeFormatter.format(zoned(entry.first.time)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(80.dp)
+                modifier = Modifier.width(80.dp).alignByBaseline()
             )
             Text(
                 describeOperation(entry),
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface
+                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.alignByBaseline()
             )
         }
         // "Failed" alone doesn't say what went wrong
