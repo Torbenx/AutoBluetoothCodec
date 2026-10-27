@@ -692,12 +692,15 @@ stores and the log (D3). A separate module gives it that:
 - The release build contains none of it; the debug build only adds
   `TestLabelReceiver` and the `INTERNET` permission.
 
-RPCs: `applyCodec` (through `CodecApplier`, returns the resolution),
-`setCodecDirectly` (bypassing the applier, like another app would),
-`getCurrentCodec`, `getCapabilities`, `getPreferredCodec`, `setPreferredCodec`,
-`deletePreferredCodec`, `getPending`, `syncPresence` and `resetForTest` (log,
-stores and singletons back to their defaults). Codecs pass as the app's own
-JSON. The RPCs run on the main thread, like the app's own calls.
+RPCs: `applyCodec` (through `CodecApplier` like a choice on the main screen,
+waits and returns the operation and its resolution), `startApplyCodec` (the
+same without waiting), `setCodecDirectly` (bypassing the applier, like another
+app would), `getCurrentCodec`, `getCapabilities`, `getPreferredCodec`,
+`setPreferredCodec` and `deletePreferredCodec` (which observe or stop
+observing the device, like the app does), `getPending`, `syncPresence` and
+`resetForTest` (log, stores and singletons back to their defaults). Codecs pass
+as the app's `AndroidCodecConfig` JSON. Calls into the app run on the main
+thread, like the app's own calls.
 
 ## 9. App changes for testability
 
@@ -770,7 +773,8 @@ needs the ones before it unless it says otherwise.
    be stable before tests build on it.
 8. **L2 on the phones** (done): `run_suite.py --suite ui` runs the shared UI
    tests on every phone; all 38 pass on all three.
-9. **Snippet module and L3 P1**: the RPCs; B1, B2 (codec types), B3, B8.
+9. **Snippet module and L3 P1** (done): the RPCs; B1, B2 (codec types), B3,
+   B8 pass on all three phones.
 10. **L4 P1**: C1, C2, C3.
 11. **L5 P1**: `snippet-uiautomator`, `screens.py`; E2, E3, E6. With this step the core promise is
     covered end to end on every phone.
@@ -824,6 +828,12 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   96 kHz, 32-bit with the system default bitrate on all three phones.
 - The baseline smoke suite (step 7) passes on all three phones: each test
   breaks one part of the baseline, and the next finds it restored.
+- Every codec type the Qudelix offers is applied on the first attempt on all
+  three phones (B2). The multi-step LDAC change of manual 1.3 takes one attempt
+  on the API 32 Pixel and two on the S24 (B3). The S24 picks AAC's variable
+  bitrate itself (codecSpecific1 133) when the app leaves it at the default.
+- After a `cycle`, the Qudelix keeps paging the phone it served last for up to
+  a minute and refuses connections from other phones meanwhile.
 - `pm clear` on API 36 also removes the app's companion links.
 - On the S24, turning Bluetooth on over adb doesn't reconnect the Qudelix,
   even right after it was connected. A `cycle` does, if the S24 was the last

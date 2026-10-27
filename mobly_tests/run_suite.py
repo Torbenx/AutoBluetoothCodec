@@ -95,8 +95,10 @@ def mobly_config(directory, serial, phone, headset_name, headset):
 
 def test_classes(suite):
     module = importlib.import_module(f"tests.{suite}_test")
+    # Only the classes with tests, not the base classes a module defines for them
     return [cls for _, cls in inspect.getmembers(module, inspect.isclass)
-            if issubclass(cls, DeviceTest) and cls is not DeviceTest and cls.__module__ == module.__name__]
+            if issubclass(cls, DeviceTest) and cls.__module__ == module.__name__
+            and any(name.startswith("test_") for name in dir(cls))]
 
 
 def run_mobly(config_path, suite, tests=None):
