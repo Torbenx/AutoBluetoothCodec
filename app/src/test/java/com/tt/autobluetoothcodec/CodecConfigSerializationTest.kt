@@ -1,5 +1,6 @@
 package com.tt.autobluetoothcodec
 
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -8,6 +9,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class CodecConfigSerializationTest {
@@ -77,5 +79,37 @@ class CodecConfigSerializationTest {
             CodecConfig.CODEC_TYPE_LDAC, CodecConfig.SAMPLE_RATE_96000, CodecConfig.BITS_PER_SAMPLE_24))!!
         val obj: JsonObject = json.parseToJsonElement(json.encodeToString<CodecConfig>(config)).jsonObject
         assertFalse(obj.containsKey("bitrate"))
+    }
+
+    @Test
+    fun codecConfig_readsUnknownRatesAndSizesAsNone() {
+        val config = json.decodeFromString<CodecConfig>("""{"type":"SBC","sampleRate":22050,"bitsPerSample":8}""")
+        assertEquals(CodecConfig.SAMPLE_RATE_NONE, config.sampleRate)
+        assertEquals(CodecConfig.BITS_PER_SAMPLE_NONE, config.bitsPerSample)
+    }
+
+    @Test
+    fun constants_areWrittenByName() {
+        val ldac = LDACCodecConfig().also { it.bitrate = LDACCodecConfig.BITRATE_MID }
+        val ldacObj = json.parseToJsonElement(json.encodeToString<CodecConfig>(ldac)).jsonObject
+        assertEquals("MID", ldacObj["bitrate"]!!.jsonPrimitive.content)
+        val aac = AACCodecConfig().also { it.variableBitrate = AACCodecConfig.VARIABLE_BITRATE_VERY_HIGH }
+        val aacObj = json.parseToJsonElement(json.encodeToString<CodecConfig>(aac)).jsonObject
+        assertEquals("VERY_HIGH", aacObj["variableBitrate"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun constants_withoutNameAreWrittenAsNumbers() {
+        val ldac = LDACCodecConfig().also { it.bitrate = 7 }
+        val text = json.encodeToString<CodecConfig>(ldac)
+        assertEquals("7", json.parseToJsonElement(text).jsonObject["bitrate"]!!.jsonPrimitive.content)
+        assertEquals(7, (json.decodeFromString<CodecConfig>(text) as LDACCodecConfig).bitrate)
+    }
+
+    @Test
+    fun constants_withUnknownNamesThrow() {
+        assertThrows(SerializationException::class.java) {
+            json.decodeFromString<CodecConfig>("""{"type":"LDAC","sampleRate":96000,"bitsPerSample":24,"bitrate":"FAST"}""")
+        }
     }
 }

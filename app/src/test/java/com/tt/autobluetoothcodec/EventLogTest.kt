@@ -45,6 +45,24 @@ class EventLogTest {
     }
 
     @Test
+    fun trim_keepsExactlyTheLimit() {
+        val events = operation("a") + operation("b")
+        assertEquals(events, EventLog.trim(events, events.size))
+        // One less drops the trigger of "a", and with it the rest of "a"
+        assertEquals(events.drop(4), EventLog.trim(events, events.size - 1))
+    }
+
+    @Test
+    fun trim_dropsInterleavedEventsOfOperationsWithoutTrigger() {
+        val a = operation("a")
+        val b = operation("b")
+        // "a" starts, "b" runs completely, then "a" ends
+        val events = a.take(2) + b + a.drop(2)
+        val trimmed = EventLog.trim(events, events.size - 1)
+        assertEquals(b, trimmed)
+    }
+
+    @Test
     fun findUnresolved_returnsTriggersOfOpenOperations() {
         val events = operation("a") + operation("b", resolved = false) + event(EventType.DEVICE_DISAPPEARED)
         assertEquals(listOf(events[4]), EventLog.findUnresolved(events))

@@ -47,6 +47,28 @@ class LogExportTest {
     }
 
     @Test
+    fun anonymise_removesNamesContainingOtherNames() {
+        val pro = LogDevice("AA:BB:CC:DD:EE:03", "Kitchen Speaker Pro")
+        val events = listOf(
+            event(0, speaker),
+            event(1, pro),
+            event(2, null, "Kitchen Speaker Pro replaced Kitchen Speaker"),
+        )
+        val message = LogExport.anonymise(events, Random(0))[2].message!!
+        assertEquals("[name removed] replaced [name removed]", message)
+    }
+
+    @Test
+    fun anonymise_givesLowerCaseAddressesInMessagesTheDevicesId() {
+        val events = listOf(
+            event(0, headphones),
+            event(1, null, "lost aa:bb:cc:dd:ee:01"),
+        )
+        val anonymised = LogExport.anonymise(events, Random(0))
+        assertEquals("lost " + anonymised[0].device!!.address, anonymised[1].message)
+    }
+
+    @Test
     fun full_keepsEverything() {
         val events = listOf(event(0, headphones, "AA:BB:CC:DD:EE:01"))
         val text = LogExport.toJsonLines(events, LogExport.Mode.FULL)
