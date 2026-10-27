@@ -11,7 +11,7 @@ this file records the procedure and the results so they can be repeated.
 | Phone | Pixel 3a (`sargo`), serial `0000000028`, patched with [test-device-images](test-device-images/README.md) |
 | Android | 9 (API 28), UTC, clock set to 2019-06-20 |
 | Screen | 1080 × 2220 px, light theme, default font size |
-| Build | debug, from commit `7c4faa8` (smoke tests), the commit that added this file (sample log tests) and the commit that renamed `VALIDATE_CODEC_CONFIG` (retest after review) and the commit that removed the debug level (retest of the levels) |
+| Build | debug, from commit `7c4faa8` (smoke tests), the commit that added this file (sample log tests) and the commit that renamed `VALIDATE_CODEC_CONFIG` (retest after review) and the commit that removed the debug level (retest of the levels) and the commit that replaced the levels by expandable entries (retest of the entries) |
 | Bluetooth | no audio device connected |
 
 The tap coordinates below are for this screen size. On another phone, find
@@ -30,7 +30,6 @@ adb exec-out cat /sdcard/ui.xml
 | Main screen overflow menu (⋮) | `1003 154` |
 | Overflow menu item "Log" | `827 308` |
 | Log screen: Share | `871 154` |
-| Log screen: Summary / Detailed | `293 330` / `787 330` |
 | Share dialog: Share button | `831 1418` |
 
 Screenshots were taken with `adb exec-out screencap -p > page.png`, scrolling
@@ -71,17 +70,18 @@ with the message `smoke_test`, and Logcat shows `I EventLog: TEST_LABEL: smoke_t
 
 Tap the overflow menu, then "Log".
 
-**Expected:** the log screen opens with Share and Clear in the top bar, the
-detail level selection, a "Today" header and the label as "Test: smoke_test".
-**Result:** pass.
+**Expected:** the log screen opens with Share and Clear in the top bar, a
+"Today" header and the label as "Test: smoke_test".
+**Result:** pass. The screen had a detail level selection then, which was
+removed later.
 
 ### 1.4 Event JSON
 
-Tap "Detailed", then the label's row.
+Long press the label's row.
 
-**Expected:** Detailed is selected and the row expands to the event's JSON.
-**Result:** pass. This first ran with a separate debug level, which had the
-JSON then; it was checked again on the detailed level in 2.3.
+**Expected:** the row expands to the event's JSON.
+**Result:** pass. This first ran when a tap showed the JSON and only on a
+detail level; the long press without levels was checked in 2.3.
 
 ### 1.5 Share dialog
 
@@ -151,34 +151,41 @@ adb shell run-as com.tt.autobluetoothcodec wc -l files/logs/event_log.jsonl
 
 **Result:** pass, every time the sample was loaded.
 
-### 2.2 Summary level
+### 2.2 Collapsed entries
 
-Tap "Summary" and screenshot every page from the top.
+Screenshot every page from the top.
 
 **Expected:**
 - Day headers "Today", "Yesterday" and a full date, newest first.
 - One line per operation, "trigger → resolution (duration)", and standalone
   events like test labels and permission changes on their own.
-- Detailed-level events are hidden, like a device appearing before audio
-  connects, "Couldn't read the codec" and the presence observing changes.
-  Tapping a row doesn't expand it.
+- Every entry appears, including a device appearing before audio connects,
+  "Couldn't read the codec" and the presence observing changes.
+- A small arrow pointing down next to the device name of each operation. A
+  long name wraps before the arrow. Standalone entries have no arrow.
 - Failed outcomes in the error color.
 - The device name above each entry, or its address if it has no name.
 - An `ERROR` resolution shows its message under the summary line.
-- Each time shares its baseline with the first line of its text, on every
-  level.
+- Each time shares its baseline with the first line of its text, collapsed
+  and expanded.
 
 **Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
-after the fixes.
+after the fixes. This ran with a Summary and a Detailed level, which hid some
+entries; the expandable entries passed when they replaced the levels.
 
-### 2.3 Detailed level
+### 2.3 Expanded entries
 
-Tap "Detailed" and screenshot every page, then tap a "Setting codec" or
-"Codec not applied yet" row.
+Tap the summary line of an operation with retries, like "Codec not applied
+after 5 attempts", and screenshot it. Long press a "Setting codec" row in it,
+tap that row, then tap one of its rows again. Tap the device name of a
+standalone entry, then its row, then long press its row and tap it.
 
 **Expected:**
+- Tapping any part of a collapsed operation expands it, and its arrow points
+  up.
 - Operations list their trigger, elements and resolution, without a summary
-  line repeating them. The duration is on the resolution.
+  line repeating them. The trigger's row stays where the summary line was.
+  The duration is on the resolution.
 - Event messages, like "companion service" or exception texts, are shown in a
   smaller line below the event.
 - The retry sequences show each attempt. Validations that don't match say
@@ -188,24 +195,34 @@ Tap "Detailed" and screenshot every page, then tap a "Setting codec" or
 - Every event appears, including "Already in progress" with the uid of the
   pending operation, "Couldn't read the codec" and the presence observing
   changes.
-- Tapping a row expands its JSON with a 2 space indent, scrolling sideways
+- Long pressing a row expands its JSON with a 2 space indent, scrolling sideways
   instead of wrapping. Codec events show both the `android` and the `own`
   model, for example `"type": "LDAC"`, `"sampleRate": 96000`,
   `"bitrate": "ADAPTIVE"`.
+- Tapping a row with its JSON open closes the JSON and nothing else.
+- Otherwise tapping anywhere on an expanded operation collapses it, its event
+  rows too.
+- Event rows never show a ripple, in expanded operations or standalone. The
+  rest of an operation does: holding its device name shades the whole entry.
+- Tapping a standalone entry does nothing, long pressing its row shows its
+  JSON. In a `uiautomator dump`, a standalone row is only
+  `long-clickable` while its JSON is closed, and also `clickable` while it's
+  open.
 
 **Result:** first run failed, see [issues](#issues-found-and-fixed). Passed
-after the fixes.
+after the fixes. This ran as the Detailed level; the expandable entries
+passed when they replaced the levels.
 
-### 2.4 Detail level is remembered
+### 2.4 Expanded state
 
-Leave the log screen at a level, force-stop the app and open the log screen
-again.
+Expand an operation and a JSON view, scroll them out of view and back. Then
+leave the log screen and open it again.
 
-**Expected:** it opens at the level last chosen.
-**Result:** pass. Before the debug level was removed it opened at Debug after
-both reloads where that was checked, afterwards at Detailed, the level chosen
-before. A level saved by an older build that no longer exists falls back to
-Summary; that wasn't checked on the phone.
+**Expected:** both stay expanded while scrolling. The reopened screen shows
+every entry collapsed.
+**Result:** pass for scrolling. Reopening and rotating the screen weren't
+checked on the phone. Before the levels were replaced, this test checked that
+the screen opened at the level last chosen, which passed.
 
 ### 2.5 Anonymised export of the sample
 
@@ -271,6 +288,19 @@ The debug level only differed from the detailed level by two event types and
 the JSON view. It was removed in a later commit: its events and the JSON view
 moved to the detailed level. Tests 2.2 to 2.4 were run again afterwards and
 passed.
+
+The Summary and Detailed levels were then replaced by entries that expand:
+an operation shows its summary until tapped, then lists its events until
+tapped again, and every event row shows its JSON when long pressed. A tap on
+a row with its JSON open closes the JSON. Event rows show no ripple, and a
+standalone row with its JSON closed handles only the long press, so
+accessibility services offer no tap action. The ripple was checked by
+capturing the screen 0.4 s into a held press (`input swipe` with the same
+start and end and a 1500 ms duration, in the background). Entries
+the summary level hid are always shown now. Tests 2.1 to 2.4 were run again
+with the new entries and passed, except for the parts of 2.4 noted there.
+The JSON first opened on a tap, with only the device name collapsing an
+operation; moving it to the long press was checked with 2.3 again.
 
 ## Not covered
 

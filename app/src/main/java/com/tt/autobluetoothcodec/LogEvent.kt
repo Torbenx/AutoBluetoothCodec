@@ -10,60 +10,57 @@ import kotlinx.serialization.Serializable
  */
 enum class OperationFlow { TRIGGER, ELEMENT, RESOLUTION, STANDALONE }
 
-/** The least detailed view of the log that shows an event. */
-enum class DetailLevel { SUMMARY, DETAILED }
-
-enum class EventType(val flow: OperationFlow, val level: DetailLevel) {
+enum class EventType(val flow: OperationFlow) {
     // A device appeared to CodecCompanionService, its preferred codec is applied
-    DEVICE_APPEARED(OperationFlow.TRIGGER, DetailLevel.DETAILED),
+    DEVICE_APPEARED(OperationFlow.TRIGGER),
     // A2DP connected to a device with a preferred codec, it's applied
-    A2DP_CONNECTED(OperationFlow.TRIGGER, DetailLevel.DETAILED),
+    A2DP_CONNECTED(OperationFlow.TRIGGER),
     // The user chose a codec in the UI
-    USER_SET_CODEC(OperationFlow.TRIGGER, DetailLevel.SUMMARY),
-    USER_SAVE_PREFERRED(OperationFlow.TRIGGER, DetailLevel.SUMMARY),
-    USER_LINK_DEVICE(OperationFlow.TRIGGER, DetailLevel.SUMMARY),
+    USER_SET_CODEC(OperationFlow.TRIGGER),
+    USER_SAVE_PREFERRED(OperationFlow.TRIGGER),
+    USER_LINK_DEVICE(OperationFlow.TRIGGER),
 
     // config is the target configuration
-    SET_CODEC_CONFIG(OperationFlow.ELEMENT, DetailLevel.DETAILED),
+    SET_CODEC_CONFIG(OperationFlow.ELEMENT),
     // Reads the codec back to check whether the target took effect. config is the target
     // configuration, actual what the Bluetooth stack reported
-    VALIDATE_CODEC_CONFIG(OperationFlow.ELEMENT, DetailLevel.DETAILED),
-    ASSOCIATION_REQUESTED(OperationFlow.ELEMENT, DetailLevel.DETAILED),
+    VALIDATE_CODEC_CONFIG(OperationFlow.ELEMENT),
+    ASSOCIATION_REQUESTED(OperationFlow.ELEMENT),
 
-    CODEC_VERIFIED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    CODEC_SET_SENT(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    PREFERRED_SAVED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    ASSOCIATION_CREATED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    ASSOCIATION_FAILED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    MAX_ATTEMPTS(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    NOT_CONNECTED(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
-    NO_ASSOCIATION(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    NO_PREFERRED_CODEC(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
-    NO_PERMISSION(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    SECURITY_EXCEPTION(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    PROFILE_UNAVAILABLE(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    PROFILE_DISCONNECTED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    TIMEOUT(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
-    CANCELLED(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
+    CODEC_VERIFIED(OperationFlow.RESOLUTION),
+    CODEC_SET_SENT(OperationFlow.RESOLUTION),
+    PREFERRED_SAVED(OperationFlow.RESOLUTION),
+    ASSOCIATION_CREATED(OperationFlow.RESOLUTION),
+    ASSOCIATION_FAILED(OperationFlow.RESOLUTION),
+    MAX_ATTEMPTS(OperationFlow.RESOLUTION),
+    NOT_CONNECTED(OperationFlow.RESOLUTION),
+    NO_ASSOCIATION(OperationFlow.RESOLUTION),
+    NO_PREFERRED_CODEC(OperationFlow.RESOLUTION),
+    NO_PERMISSION(OperationFlow.RESOLUTION),
+    SECURITY_EXCEPTION(OperationFlow.RESOLUTION),
+    PROFILE_UNAVAILABLE(OperationFlow.RESOLUTION),
+    PROFILE_DISCONNECTED(OperationFlow.RESOLUTION),
+    TIMEOUT(OperationFlow.RESOLUTION),
+    CANCELLED(OperationFlow.RESOLUTION),
     // The device is already pending in another operation, the message names it
-    ALREADY_PENDING(OperationFlow.RESOLUTION, DetailLevel.DETAILED),
-    ERROR(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
+    ALREADY_PENDING(OperationFlow.RESOLUTION),
+    ERROR(OperationFlow.RESOLUTION),
     // Added by EventLog for operations a previous process didn't resolve. That process ended,
     // but why isn't known: it may have crashed, been force-stopped or been killed by the system
-    OPERATION_INTERRUPTED(OperationFlow.RESOLUTION, DetailLevel.SUMMARY),
+    OPERATION_INTERRUPTED(OperationFlow.RESOLUTION),
 
-    DEVICE_DISAPPEARED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
+    DEVICE_DISAPPEARED(OperationFlow.STANDALONE),
     // MainActivity read a codec that differs from the last one known for the device. When the
     // codec changed isn't known, only that it changed since the last known one was logged
-    ACTIVITY_OBSERVED_CODEC_CHANGE(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    READ_FAILED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    PREFERRED_DELETED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
-    DEVICE_UNLINKED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
-    PERMISSION_CHANGED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    OBSERVING_CHANGED(OperationFlow.STANDALONE, DetailLevel.DETAILED),
-    OBSERVING_FAILED(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
+    ACTIVITY_OBSERVED_CODEC_CHANGE(OperationFlow.STANDALONE),
+    READ_FAILED(OperationFlow.STANDALONE),
+    PREFERRED_DELETED(OperationFlow.STANDALONE),
+    DEVICE_UNLINKED(OperationFlow.STANDALONE),
+    PERMISSION_CHANGED(OperationFlow.STANDALONE),
+    OBSERVING_CHANGED(OperationFlow.STANDALONE),
+    OBSERVING_FAILED(OperationFlow.STANDALONE),
     // Sent by tests to mark where a test step starts, the message is the label
-    TEST_LABEL(OperationFlow.STANDALONE, DetailLevel.SUMMARY),
+    TEST_LABEL(OperationFlow.STANDALONE),
 }
 
 /**

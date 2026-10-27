@@ -1,13 +1,17 @@
 package com.tt.autobluetoothcodec
 
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +24,10 @@ import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +36,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,26 +46,31 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.core.content.edit
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -71,14 +83,13 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 /**
- * Shows the [EventLog], newest first. An operation is shown as one entry. The summary shows it as one
- * line, the detailed level lists all its events, each of which can be expanded to its JSON.
+ * Shows the [EventLog], newest first. An operation is shown as one entry, collapsed to a one line
+ * summary. Tapping it expands it to all its events, tapping it again collapses it. Long pressing an
+ * event shows its JSON.
  */
 class LogActivity : ComponentActivity() {
     companion object {
         private const val TAG = "LogActivity"
-        private const val PREFERENCES_NAME = "log_viewer"
-        private const val KEY_DETAIL_LEVEL = "detail_level"
 
         // Shown in the error color
         private val FAILURES = setOf(
@@ -113,24 +124,13 @@ class LogActivity : ComponentActivity() {
     private val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
     private val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
-    private var detailLevel by mutableStateOf(DetailLevel.SUMMARY)
     private var showExportDialog by mutableStateOf(false)
     private var showClearDialog by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableLightEdgeToEdge()
         super.onCreate(savedInstanceState)
-        detailLevel = preferences().getString(KEY_DETAIL_LEVEL, null)
-            ?.let { name -> DetailLevel.entries.firstOrNull { it.name == name } }
-            ?: DetailLevel.SUMMARY
         setContent { LogScreen() }
-    }
-
-    private fun preferences() = getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-
-    private fun changeDetailLevel(level: DetailLevel) {
-        detailLevel = level
-        preferences().edit { putString(KEY_DETAIL_LEVEL, level.name) }
     }
 
     private fun shareLog(mode: LogExport.Mode) {
@@ -153,8 +153,6 @@ class LogActivity : ComponentActivity() {
         val first get() = events.first()
         val isOperation get() = first.type.flow == OperationFlow.TRIGGER
         val resolution get() = events.lastOrNull { it.type.flow == OperationFlow.RESOLUTION }
-        // The least detailed level that shows any of the events
-        val level get() = events.minOf { it.type.level }
     }
 
     private fun buildEntries(events: List<LogEvent>): List<LogEntry> {
@@ -259,15 +257,46 @@ class LogActivity : ComponentActivity() {
         return if (type in FAILURES) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    private fun EventRow(event: LogEvent, suffix: String = "") {
-        var expanded by remember(event.seq) { mutableStateOf(false) }
-        val expandable = detailLevel == DetailLevel.DETAILED
+    private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String? = null, onClick: (() -> Unit)? = null) {
+        // Unlike remember, survives the row being scrolled out of view
+        var showJson by rememberSaveable { mutableStateOf(false) }
+        val haptics = LocalHapticFeedback.current
+        // The row takes the taps inside it, so it passes them on to its entry, unless they close the JSON
+        val tap = if (showJson) ({ showJson = false }) else onClick
+        // Event rows don't ripple, the change they make shows itself
+        val gestures = if (tap != null) {
+            Modifier.combinedClickable(
+                interactionSource = null,
+                indication = null,
+                onClickLabel = if (showJson) "Hide JSON" else onClickLabel,
+                onLongClickLabel = if (showJson) "Hide JSON" else "Show JSON",
+                onLongClick = { showJson = !showJson },
+                onClick = tap
+            )
+        } else {
+            // Only the long press does something, handling just that means accessibility services offer
+            // no tap
+            Modifier
+                .pointerInput(Unit) {
+                    detectTapGestures(onLongPress = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        showJson = true
+                    })
+                }
+                .semantics(mergeDescendants = true) {
+                    onLongClick("Show JSON") {
+                        showJson = true
+                        true
+                    }
+                }
+        }
         Column(
             Modifier
                 .fillMaxWidth()
-                .clickable(enabled = expandable) { expanded = !expanded }
-                .padding(vertical = 2.dp)
+                .then(gestures)
+                .padding(horizontal = 16.dp, vertical = 2.dp)
         ) {
             // The time is smaller than the text, aligning their baselines keeps it on the first line
             Row {
@@ -293,7 +322,7 @@ class LogActivity : ComponentActivity() {
                     modifier = Modifier.padding(start = 80.dp)
                 )
             }
-            if (expandable && expanded) {
+            if (showJson) {
                 // Scrolls instead of wrapping, wrapped JSON is hard to read
                 Text(
                     prettyJson.encodeToString(event),
@@ -310,24 +339,57 @@ class LogActivity : ComponentActivity() {
 
     @Composable
     private fun EntryItem(entry: LogEntry) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // Unlike remember, survives the entry being scrolled out of view and the screen being rotated
+        var expanded by rememberSaveable { mutableStateOf(false) }
+        // A tap anywhere on an operation toggles it, its event rows pass their taps on
+        val toggleLabel = if (expanded) "Hide events" else "Show events"
+        val toggle = if (!entry.isOperation) Modifier else Modifier
+            .clickable(onClickLabel = toggleLabel, role = Role.Button) { expanded = !expanded }
+            .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+        Column(Modifier.fillMaxWidth().then(toggle).animateContentSize()) {
             val device = entry.first.device
-            if (device != null) {
-                Text(
-                    device.name ?: device.address,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+            if (device != null)
+                DeviceHeader(device, arrow = entry.isOperation, expanded = expanded)
+            else
+                Spacer(Modifier.height(8.dp))
             if (!entry.isOperation) {
                 EventRow(entry.first)
-            } else if (detailLevel == DetailLevel.SUMMARY) {
+            } else if (!expanded) {
                 OperationSummary(entry)
             } else {
                 val resolution = entry.resolution
                 val duration = describeDuration(entry)?.let { " ($it)" } ?: ""
-                for (event in entry.events)
-                    EventRow(event, if (event === resolution) duration else "")
+                // Rows created in a loop need a key to tell their saved state apart
+                for (event in entry.events) key(event.seq) {
+                    EventRow(event, if (event === resolution) duration else "", toggleLabel) { expanded = false }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+
+    @Composable
+    private fun DeviceHeader(device: LogDevice, arrow: Boolean, expanded: Boolean) {
+        val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "arrow rotation")
+        // The top padding is part of the header, so it's easier to tap
+        Row(
+            Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Doesn't fill the row, so the arrow stays next to the name, but a long name wraps before it
+            Text(
+                device.name ?: device.address,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (arrow) {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 4.dp).size(20.dp).rotate(rotation)
+                )
             }
         }
     }
@@ -335,48 +397,31 @@ class LogActivity : ComponentActivity() {
     @Composable
     private fun OperationSummary(entry: LogEntry) {
         val resolution = entry.resolution
-        Row {
-            Text(
-                timeFormatter.format(zoned(entry.first.time)),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(80.dp).alignByBaseline()
-            )
-            Text(
-                describeOperation(entry),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.alignByBaseline()
-            )
-        }
-        // "Failed" alone doesn't say what went wrong
-        val message = resolution?.message
-        if (resolution?.type == EventType.ERROR && message != null) {
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 80.dp)
-            )
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun DetailLevelSelection() {
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            val levels = DetailLevel.entries
-            levels.forEachIndexed { index, level ->
-                SegmentedButton(
-                    selected = level == detailLevel,
-                    onClick = { changeDetailLevel(level) },
-                    shape = SegmentedButtonDefaults.itemShape(index, levels.size)
-                ) {
-                    Text(when (level) {
-                        DetailLevel.SUMMARY -> "Summary"
-                        DetailLevel.DETAILED -> "Detailed"
-                    })
-                }
+        // Padded like EventRow, so the summary and the trigger's row line up when expanding
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+            Row {
+                Text(
+                    timeFormatter.format(zoned(entry.first.time)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(80.dp).alignByBaseline()
+                )
+                Text(
+                    describeOperation(entry),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.alignByBaseline()
+                )
+            }
+            // "Failed" alone doesn't say what went wrong
+            val message = resolution?.message
+            if (resolution?.type == EventType.ERROR && message != null) {
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 80.dp)
+                )
             }
         }
     }
@@ -486,8 +531,7 @@ class LogActivity : ComponentActivity() {
                     end = innerPadding.calculateEndPadding(layoutDirection)
                 )
             ) {
-                DetailLevelSelection()
-                val entries = buildEntries(events).filter { it.level <= detailLevel }.reversed()
+                val entries = remember(events) { buildEntries(events).reversed() }
                 if (entries.isEmpty()) {
                     Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                         Text("No events logged yet", style = MaterialTheme.typography.bodyLarge)
