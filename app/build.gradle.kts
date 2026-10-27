@@ -7,6 +7,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+/** The commit the working tree is at, with "-dirty" if it has changes. */
+fun gitDescription(): String {
+    return try {
+        providers.exec {
+            commandLine("git", "describe", "--always", "--dirty")
+        }.standardOutput.asText.get().trim()
+    } catch (e: Exception) {
+        "unknown"
+    }
+}
+
 android {
     namespace = "com.tt.autobluetoothcodec"
     compileSdk = 36
@@ -22,6 +33,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Lets the test harness tell which build is installed, like "1.0-fd46a1d-dirty"
+            versionNameSuffix = "-" + gitDescription()
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
