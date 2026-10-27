@@ -24,6 +24,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.VisibleForTesting
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateContentSize
@@ -96,6 +97,13 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         // Kept per process, so the activity being recreated doesn't log the same state again
         private var loggedPermissionState: PermissionState? = null
         private val readFailures = HashSet<String>()
+
+        /** Forgets the states logged by this process, for tests. */
+        @VisibleForTesting
+        fun resetForTest() {
+            loggedPermissionState = null
+            readFailures.clear()
+        }
 
         private fun showFailure(context: Context, resolution: EventType) {
             val text = when (resolution) {

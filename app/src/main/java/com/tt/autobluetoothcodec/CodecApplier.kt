@@ -41,6 +41,17 @@ class CodecApplier @VisibleForTesting internal constructor(
             val appContext = context.applicationContext
             return instance ?: CodecApplier(appContext, SystemA2dpAccess(appContext)).also { instance = it }
         }
+
+        /**
+         * Replaces the process's applier, for tests. From now on [get] returns one that uses [access],
+         * or a new one that uses the system's profile if it's null. The pending requests of the
+         * current applier are dropped without being resolved.
+         */
+        @VisibleForTesting
+        fun resetForTest(context: Context, access: A2dpAccess? = null) {
+            instance?.close()
+            instance = access?.let { CodecApplier(context.applicationContext, it) }
+        }
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -113,6 +124,16 @@ class CodecApplier @VisibleForTesting internal constructor(
         val request = requests.firstOrNull { it.operation == operation } ?: return false
         finish(request, resolution, attempt = request.attemptCount, message = message)
         return true
+    }
+
+    /** Drops all requests and releases the profile. */
+    private fun close() {
+        handler.removeCallbacks(processRunnable)
+        requests.clear()
+        publishPending()
+        profileConnected = false
+        profileRequested = false
+        a2dp.close()
     }
 
     private fun reject(operation: EventLog.Operation, onDone: ((EventType) -> Unit)?, resolution: EventType, message: String? = null) {

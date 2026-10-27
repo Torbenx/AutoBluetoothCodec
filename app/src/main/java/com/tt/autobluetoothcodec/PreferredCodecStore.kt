@@ -3,6 +3,7 @@ package com.tt.autobluetoothcodec
 import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
@@ -39,6 +40,12 @@ object PreferredCodecStore {
 
     fun remove(context: Context, device: BluetoothDevice) {
         preferences(context).edit { remove(key(device)) }
+    }
+
+    /** Removes the preferred codecs of all devices, for tests. */
+    @VisibleForTesting
+    fun clearForTest(context: Context) {
+        preferences(context).edit(commit = true) { clear() }
     }
 
     private fun preferences(context: Context) =

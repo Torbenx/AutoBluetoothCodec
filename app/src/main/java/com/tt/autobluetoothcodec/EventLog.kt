@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.AtomicFile
 import android.util.Log
+import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,20 @@ class EventLog private constructor(context: Context) {
 
         fun get(context: Context): EventLog {
             return instance ?: EventLog(context.applicationContext).also { instance = it }
+        }
+
+        /**
+         * Deletes the log, for tests. [get] loads it again from now on. Waits for the pending writes
+         * first, so they don't recreate the file.
+         */
+        @VisibleForTesting
+        fun resetForTest(context: Context) {
+            instance?.let { log ->
+                log.executor.submit {}.get()
+                log.executor.shutdown()
+            }
+            instance = null
+            AtomicFile(File(File(context.applicationContext.filesDir, DIRECTORY), FILE_NAME)).delete()
         }
 
         /** Parses the lines of the log file, skipping lines that can't be parsed. */
