@@ -72,9 +72,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -641,6 +645,7 @@ private fun StatusChip(
             onClick = onButtonClick,
             enabled = isButton,
             modifier = Modifier
+                .testTag("status_chip")
                 .animateContentSize(
                     animationSpec = tween(500),
                     alignment = Alignment.CenterEnd
@@ -865,7 +870,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
     var extended by remember { mutableStateOf(initialExtended) }
 
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag(deviceTag(device)),
         shadowElevation = 6.dp,
         shape = CardDefaults.elevatedShape,
         onClick = { extended = !extended },
@@ -952,13 +957,14 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
     var expanded by remember { mutableStateOf(false) }
     val preferredConfig = device.preferredConfig
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("device_menu")) {
             Icon(Icons.Default.MoreVert, contentDescription = "More options")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             if (preferredConfig != null && !isPreferredActive) {
                 DropdownMenuItem(
                     text = { Text("Restore Preferred Codec") },
+                    modifier = Modifier.testTag("restore_preferred"),
                     onClick = {
                         expanded = false
                         actions.restorePreferred(device.device, preferredConfig)
@@ -968,6 +974,7 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
             if (preferredConfig != null) {
                 DropdownMenuItem(
                     text = { Text("Delete Preferred Codec") },
+                    modifier = Modifier.testTag("delete_preferred"),
                     onClick = {
                         expanded = false
                         actions.deletePreferred(device.device)
@@ -977,6 +984,7 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
             if (showDevelopmentOptions && device.associated) {
                 DropdownMenuItem(
                     text = { Text("Unlink Device (Debug)") },
+                    modifier = Modifier.testTag("unlink_device"),
                     onClick = {
                         expanded = false
                         actions.unlink(device.device)
@@ -1005,6 +1013,7 @@ private fun AssociationRow(device: DeviceData, canAssociate: Boolean, associatio
         Spacer(Modifier.height(8.dp))
         Button(
             onClick = { actions.link(device.device) },
+            modifier = Modifier.testTag("link_device"),
             enabled = !associationInProgress
         ) {
             Text("Allow")
@@ -1047,12 +1056,13 @@ private fun PermissionRequired(modifier: Modifier, permissionState: PermissionSt
 private fun AppMenu(onOpenLog: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("app_menu")) {
             Icon(Icons.Default.MoreVert, contentDescription = "More options")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
                 text = { Text("Log") },
+                modifier = Modifier.testTag("open_log"),
                 onClick = {
                     expanded = false
                     onOpenLog()
@@ -1062,11 +1072,16 @@ private fun AppMenu(onOpenLog: () -> Unit) {
     }
 }
 
+/** The test tag of a device's card. */
+internal fun deviceTag(device: DeviceData) = "device_" + device.device.address.uppercase()
+
 /** The main screen, the connected devices with their codecs. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun MainScreen(state: MainScreenState, actions: MainScreenActions) {
     Scaffold(
+        // Lets UiAutomator find the elements by their test tags
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },

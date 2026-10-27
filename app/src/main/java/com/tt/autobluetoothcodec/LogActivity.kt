@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
@@ -65,10 +66,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -363,7 +366,7 @@ private fun EntryItem(entry: LogEntry) {
     val toggle = if (!entry.isOperation) Modifier else Modifier
         .clickable(onClickLabel = toggleLabel, role = Role.Button) { expanded = !expanded }
         .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
-    Column(Modifier.fillMaxWidth().then(toggle).animateContentSize()) {
+    Column(Modifier.fillMaxWidth().then(toggle).animateContentSize().testTag("log_entry_${entry.first.seq}")) {
         val device = entry.first.device
         if (device != null)
             DeviceHeader(device, arrow = entry.isOperation, expanded = expanded)
@@ -514,12 +517,14 @@ private fun ClearDialog(onDismiss: () -> Unit, onClear: () -> Unit) {
 }
 
 /** The log screen, [events] newest first. [today] decides which day is shown as today. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScreenActions) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     Scaffold(
+        // Lets UiAutomator find the elements by their test tags
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         topBar = {
             TopAppBar(
                 title = { Text("Log") },
@@ -529,10 +534,10 @@ internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScr
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showExportDialog = true }, enabled = events.isNotEmpty()) {
+                    IconButton(onClick = { showExportDialog = true }, enabled = events.isNotEmpty(), modifier = Modifier.testTag("share_log")) {
                         Icon(Icons.Default.Share, contentDescription = "Share log")
                     }
-                    IconButton(onClick = { showClearDialog = true }, enabled = events.isNotEmpty()) {
+                    IconButton(onClick = { showClearDialog = true }, enabled = events.isNotEmpty(), modifier = Modifier.testTag("clear_log")) {
                         Icon(Icons.Default.Delete, contentDescription = "Clear log")
                     }
                 }
