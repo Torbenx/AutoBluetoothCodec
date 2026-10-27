@@ -1,0 +1,45 @@
+Bluetooth Status
+  enabled: true
+  state: ON
+  address: 0A:1B:2C:00:00:32
+  name: test phone
+  time since enabled: 00:03:47.961
+
+Profile: A2dpService
+  mActiveDevice: 0A:1B:2C:3D:4E:5F
+  mMaxConnectedAudioDevices: 5
+  codecConfigPriorities:
+    SBC: 1001
+    AAC: 2001
+    aptX: 3001
+    aptX HD: 4001
+    LDAC: 5001
+  mA2dpOffloadEnabled: true
+  codecConfigOffloading:
+    {codecName:SBC,mCodecType:0,mCodecPriority:0,mSampleRate:0x0(NONE),mBitsPerSample:0x0(NONE),mChannelMode:0x0(NONE),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    {codecName:AAC,mCodecType:1,mCodecPriority:0,mSampleRate:0x0(NONE),mBitsPerSample:0x0(NONE),mChannelMode:0x0(NONE),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    {codecName:aptX HD,mCodecType:3,mCodecPriority:0,mSampleRate:0x0(NONE),mBitsPerSample:0x0(NONE),mChannelMode:0x0(NONE),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    {codecName:aptX,mCodecType:2,mCodecPriority:0,mSampleRate:0x0(NONE),mBitsPerSample:0x0(NONE),mChannelMode:0x0(NONE),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    {codecName:LDAC,mCodecType:4,mCodecPriority:0,mSampleRate:0x0(NONE),mBitsPerSample:0x0(NONE),mChannelMode:0x0(NONE),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+  === A2dpStateMachine for 0A:1B:2C:3D:4E:5F (Active) ===
+    getConnectionPolicy: 100
+    mConnectionState: CONNECTED, mLastConnectionState: CONNECTING
+    mIsPlaying: false
+    getSupportsOptionalCodecs: 1, getOptionalCodecsEnabled: 1
+    mCodecConfig: {codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0x8(96000),mBitsPerSample:0x4(32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    mCodecsSelectableCapabilities:
+      {codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0xf(44100|48000|88200|96000),mBitsPerSample:0x7(16|24|32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+      {codecName:aptX HD,mCodecType:3,mCodecPriority:4001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x2(24),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+      {codecName:aptX,mCodecType:2,mCodecPriority:3001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+      {codecName:AAC,mCodecType:1,mCodecPriority:2001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+      {codecName:SBC,mCodecType:0,mCodecPriority:1001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x3(MONO|STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}
+    StateMachine: name=A2dpStateMachine state=Connected
+    StateMachineLog:
+      A2dpStateMachine:
+       total records=5
+       rec[0]: time=10-27 22:51:45.515 processed=Disconnected org=Disconnected dest=Connecting what=1(0x1) CONNECT: arg1=0, arg2=0, obj=null
+       rec[1]: time=10-27 22:51:45.519 processed=Connecting org=Connecting dest=<null> what=101(0x65) STACK_EVENT: arg1=0, arg2=0, obj=A2dpStackEvent {type:EVENT_TYPE_CONNECTION_STATE_CHANGED, device:0A:1B:2C:3D:4E:5F, value1:CONNECTING}
+       rec[2]: time=10-27 22:51:48.662 processed=Connecting org=Connecting dest=<null> what=101(0x65) STACK_EVENT: arg1=0, arg2=0, obj=A2dpStackEvent {type:EVENT_TYPE_CODEC_CONFIG_CHANGED, device:0A:1B:2C:3D:4E:5F, value1:0, codecStatus:{mCodecConfig:{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0x8(96000),mBitsPerSample:0x4(32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0},mCodecsLocalCapabilities:[{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0xf(44100|48000|88200|96000),mBitsPerSample:0x7(16|24|32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX HD,mCodecType:3,mCodecPriority:4001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x2(24),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX,mCodecType:2,mCodecPriority:3001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:AAC,mCodecType:1,mCodecPriority:2001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:SBC,mCodecType:0,mCodecPriority:1001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x3(MONO|STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}],mCodecsSelectableCapabilities:[{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0xf(44100|48000|88200|96000),mBitsPerSample:0x7(16|24|32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX HD,mCodecType:3,mCodecPriority:4001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x2(24),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX,mCodecType:2,mCodecPriority:3001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:AAC,mCodecType:1,mCodecPriority:2001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:SBC,mCodecType:0,mCodecPriority:1001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x3(MONO|STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}]}}
+       rec[3]: time=10-27 22:51:48.752 processed=Connecting org=Connecting dest=Connected what=101(0x65) STACK_EVENT: arg1=0, arg2=0, obj=A2dpStackEvent {type:EVENT_TYPE_CONNECTION_STATE_CHANGED, device:0A:1B:2C:3D:4E:5F, value1:CONNECTED}
+       rec[4]: time=10-27 22:51:48.787 processed=Connected org=Connected dest=<null> what=101(0x65) STACK_EVENT: arg1=0, arg2=0, obj=A2dpStackEvent {type:EVENT_TYPE_CODEC_CONFIG_CHANGED, device:0A:1B:2C:3D:4E:5F, value1:0, codecStatus:{mCodecConfig:{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0x8(96000),mBitsPerSample:0x4(32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0},mCodecsLocalCapabilities:[{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0xf(44100|48000|88200|96000),mBitsPerSample:0x7(16|24|32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX HD,mCodecType:3,mCodecPriority:4001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x2(24),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX,mCodecType:2,mCodecPriority:3001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:AAC,mCodecType:1,mCodecPriority:2001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:SBC,mCodecType:0,mCodecPriority:1001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x3(MONO|STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}],mCodecsSelectableCapabilities:[{codecName:LDAC,mCodecType:4,mCodecPriority:5001,mSampleRate:0xf(44100|48000|88200|96000),mBitsPerSample:0x7(16|24|32),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX HD,mCodecType:3,mCodecPriority:4001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x2(24),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:aptX,mCodecType:2,mCodecPriority:3001,mSampleRate:0x3(44100|48000),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:AAC,mCodecType:1,mCodecPriority:2001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x2(STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}, {codecName:SBC,mCodecType:0,mCodecPriority:1001,mSampleRate:0x1(44100),mBitsPerSample:0x1(16),mChannelMode:0x3(MONO|STEREO),mCodecSpecific1:0,mCodecSpecific2:0,mCodecSpecific3:0,mCodecSpecific4:0}]}}
+      curState=Connected

@@ -37,6 +37,24 @@ android {
     lint {
         disable.add("MissingPermission")
     }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all {
+                // Robolectric's SDK 36 sets up the application's shared memory through JDK internals
+                it.jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
+            }
+        }
+    }
+    sourceSets {
+        // The UI tests run on the JVM with Robolectric and on the phones, see TestConcept.md section 7
+        for (name in listOf("test", "androidTest")) {
+            getByName(name) {
+                java.srcDir("src/sharedTest/java")
+                resources.srcDir("src/sharedTest/resources")
+            }
+        }
+    }
 }
 
 kotlin {
@@ -56,6 +74,10 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.kotlinx.serialization.json)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.junit)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

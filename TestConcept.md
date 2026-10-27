@@ -65,7 +65,6 @@ lock screen is a capability:
 | --- | --- | --- | --- |
 | Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
 | No secure lock screen | `testbed.yaml` | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
-| End a process the system keeps bound | `run-as … kill`, or root (to check in the spike) | C4 | to check |
 | LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
 
 ### Code paths per API level
@@ -107,7 +106,7 @@ has no A2DP sink with real codecs.
 | --- | --- | --- |
 | UI (UiAutomator) | Every user action, including system dialogs (permission, companion link) | Only in UI tests and journeys |
 | App snippet | Apply a codec through `CodecApplier`, set a codec bypassing it (like another app would), set or delete preferred codecs, sync presence, reset the app's state | Not in background or cold start tests |
-| adb, Bluetooth | The phone's adapter on and off (`svc bluetooth`, with su on API 28) | See [device_state.py](mobly_tests/lib/device_state.py). A2DP alone can't be switched from adb without privileged permissions, as far as known (D14) |
+| adb, Bluetooth | The phone's adapter on and off (`svc bluetooth`, with su on API 28) | See [device_state.py](mobly_tests/lib/device_state.py). A2DP alone can't be switched from adb: `cmd bluetooth_manager` on API 36 only offers the adapter and its BLE mode (D14) |
 | adb, app lifecycle | Install, update, clear data, kill the process, grant and revoke the permission, launch activities | Revoking a permission kills the process |
 | adb, companion | `cmd companiondevice associate/disassociate` (checked on 28 and 32, to check on 36) | Links a device without the system dialog (D9) |
 | Headset | Depends on the backend, see [6.3](#63-headsets). Qudelix: `bt-off` (device disappears), `no-a2dp` (A2DP down, link and BLE stay), `normal`, `cycle` | `no-a2dp` gives the state "present but A2DP not connected" that cold start tests need |
@@ -147,17 +146,29 @@ Pitfalls the harness has to handle:
   it doesn't leave the package stopped.
 - `am force-stop` puts the package in the stopped state, so manifest receivers
   get nothing until a component of the app is started again. A broadcast to
-  `TestLabelReceiver` without a label does that without writing to the log. A
-  process killed by the system is simulated with `am kill` (only works in the
-  background) or `kill`.
+  `TestLabelReceiver` without a label does that without writing to the log.
+- A process killed by the system is simulated with `run-as … kill -9`, which
+  works without root and doesn't stop the package. `am kill` doesn't end a
+  process the companion service keeps bound. On the S24 the system binds the
+  service again within about 3 s and delivers `onDeviceAppeared` again.
 - The phones' clocks differ (the API 28 Pixel is in 2019). Events are ordered
   by `seq` and labels, never compared with the host's time.
 - `dumpsys bluetooth_manager` has several per-device tables, like the AVRCP
   volume table with its own connection column. The A2DP connection and codec
-  come from the A2DP service section only.
+  come from the A2DP service section only. Its format differs: API 28 has an
+  `mDevice:` line and `state=Connected`, API 32 and 36 have an
+  `A2dpStateMachine for …` block with `mConnectionState: CONNECTED` and
+  `STATE_CONNECTED`. API 36 masks addresses as `XX:XX:XX:XX:4E:5F`, so there
+  the device is matched by its last two bytes.
 - `DEVICE_APPEARED` resolving `NOT_CONNECTED` is normal: the device appears
   before A2DP connects. On API 31/32 it appears when its BLE advertisements
-  are seen, even without any connection (C13).
+  are seen, even without any connection. On the S24 it's seen even with the
+  phone's Bluetooth off, and appears and disappears every 15–20 s, each time
+  resolving `PROFILE_UNAVAILABLE` (C13).
+- Only a full reconnect brings the codec back to the phone's own choice: the
+  headset going away (Qudelix `cycle`) or the phone's Bluetooth off and on.
+  After an A2DP-only reconnect (`no-a2dp`, `normal`) the stack keeps the codec
+  that was set before.
 - Opening the main screen logs the current codec as
   `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE` when it differs from the last one
   in the log. With the empty log of the baseline, the first start always logs
@@ -285,7 +296,7 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C1 | App process killed, the headset reconnects: the preferred codec is applied, by the receiver up to 30 and the service from 31 | all | | P1 |
 | C2 | The same with the app in the foreground and in the background but alive (manual 2.1) | all | | P1 |
 | C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
-| C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | end a bound process | P2 |
+| C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
 | C5 | Permission revoked, the device connects: `NO_PERMISSION` is logged, no crash | 31+ | | P2 |
 | C6 | No preferred codec: the codec isn't touched, from 31 the app isn't even started | all | | P2 |
 | C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
@@ -374,12 +385,12 @@ hasn't saved a preferred codec:
 | Build | The build under test, its version stamp matches the working tree | `dumpsys package` | Installing, only in the suite setup, never between tests |
 | App data | Log empty, all settings at their defaults, so no preferred codecs | `run-as` listing `files/` and `shared_prefs/` | Resetting the app data, see below |
 | Package | Not stopped, so manifest receivers get broadcasts | `dumpsys package` | A broadcast to `TestLabelReceiver` without a label |
-| Nearby devices permission (31+) | Granted, not marked user-set or user-fixed | `dumpsys package` | `pm grant`, `pm clear-permission-flags` |
-| Link | The headset is linked on every phone, also where the app doesn't need it; nothing is observed | `cmd companiondevice list`; observing from `dumpsys companiondevice` on 33+, from the system's file with root on 31–32 | `cmd companiondevice disassociate` and `associate`, which also ends observing |
+| Nearby devices permission (31+) | Granted, not marked user-set or user-fixed | `dumpsys package` | `pm grant` after the reset, which clears the flags |
+| Link | The headset is linked on every phone, also where the app doesn't need it; nothing is observed | `cmd companiondevice list`; observing from `dumpsys companiondevice` on 33+. API 31–32 show observing nowhere, not even in the system's file | `cmd companiondevice disassociate` and `associate`, which also ends observing. On 31–32 always, since it can't be checked |
 | Phone Bluetooth | On; every other phone on adb off | `device_state` | `device_state.set_bluetooth` |
 | A2DP | The headset is connected and the active device | `bt_oracle` | The connect fixture, [6.6](#66-connecting-the-headset) |
 | Headset | Its normal state (Qudelix: `normal`) | The backend | The backend |
-| Codec | The phone's own choice: what the stack picks on connect when the app has no preferred codec, recorded per phone in `setup_class` (D11) | `bt_oracle` | A reconnect |
+| Codec | The phone's own choice: what the stack picks on connect when the app has no preferred codec, recorded per phone in `setup_class` (D11) | `bt_oracle` | A full reconnect, the headset's `reconnect()` |
 | Screen | On and unlocked, the launcher in front | `device_state` | Home key; on and unlocked are only checked (D15) |
 
 Not part of the baseline:
@@ -407,12 +418,13 @@ Not part of the baseline:
   Bluetooth, the headset and A2DP; then the codec; the screen last.
 
 **Resetting the app data.** `pm clear` resets everything the app stores,
-including settings added later, and ends the process in the same step. What
-else it resets (the permission, the link, observing, the stopped state) is to
-check in the spike; the restore repairs those afterwards, which is why the
-check runs again after it. If `pm clear` removes something the harness can't
-put back, the fallback is ending the process and deleting the files with
-`run-as`.
+including settings added later, and ends the process in the same step. It
+also revokes the permission and clears its flags, but keeps the link and
+observing, and doesn't stop the package (checked on API 28 and 32). The
+restore grants the permission and relinks afterwards, which is why the check
+runs again after it. If `pm clear` turns out to remove something the harness
+can't put back, the fallback is ending the process and deleting the files
+with `run-as`.
 
 While the snippet is loaded (L3), the process can't end without unloading it,
 so the snippet resets the app's state instead (`resetForTest`, section 8), and
@@ -431,7 +443,7 @@ to diagnose a problem with that headset, so the harness abstracts it.
 | Operation | For the app | Qudelix backend | Phone backend (any headset) |
 | --- | --- | --- | --- |
 | `reconnect()` | The device goes away and comes back, like switching it off and on | `cycle` | The phone's Bluetooth off and on |
-| `disconnect_a2dp()`, `connect_a2dp()` | A2DP goes down and up, the device stays present | `no-a2dp`, `normal` | – |
+| `disconnect_a2dp()`, `connect_a2dp()` | A2DP goes down and up, the device stays present; the codec stays as it was | `no-a2dp`, `normal` | – |
 | `power_off()`, `power_on()` | The device disappears and appears, the phone's Bluetooth stays on | `bt-off`, reset to `normal` | – |
 | `ensure_connected()` | The connect fixture, 6.6 | | |
 | `check()`, `restore()` | Its part of the baseline | Mode is `normal` | Nothing to check |
@@ -517,9 +529,12 @@ it on for the phone under test. The fixture:
 The sanity checks (6.9) make sure step 2 works for a phone before its tests
 start.
 
-During the first review, cycling the Qudelix didn't connect A2DP to the API 32
-Pixel within 45 s, and the Pixel didn't connect on its own ("most recently
-active a2dp device is null"). The spike finds out why.
+When Bluetooth turns on, a phone only connects on its own to its most recently
+active A2DP device, and after a `cycle` the Qudelix only reconnects to the
+phone it served last. So each phone has to connect to the headset once from
+its Bluetooth settings, as part of preparing it. After that, turning the
+phone's Bluetooth on connects within 6–8 s, whichever phone the Qudelix served
+before.
 
 Fixture steps like these are retried; assertions never are. A test that fails
 is rerun by hand or with a flag, and tests known to be flaky are listed with
@@ -548,7 +563,8 @@ dump, and the headset's status.
 ### 6.9 Running
 
 Prepared once per phone, outside the suite: developer options and USB
-debugging on, the headsets paired. Saving and restoring a phone's own app data,
+debugging on, the headsets paired and connected once from the phone's
+Bluetooth settings (6.6). Saving and restoring a phone's own app data,
 like the S24's, is outside the suite too (D7).
 
 1. Start `testbed_session.py` in one terminal.
@@ -608,7 +624,9 @@ setup:
    and `ui-test-junit4` (with the Compose BOM); `androidTestImplementation`
    already has the last two, and `debugImplementation` the test manifest.
    `testOptions.unitTests.isIncludeAndroidResources = true` lets Robolectric
-   see the app's strings and themes. The SDK level of the JVM run goes into
+   see the app's strings and themes. Robolectric's SDK 36 needs
+   `--add-opens=java.base/jdk.internal.access=ALL-UNNAMED` on JDK 21. The SDK
+   level of the JVM run goes into
    `app/src/test/resources/robolectric.properties`.
 4. **An unlocked phone.** Compose tests need a visible window. The phones are
    unlocked during a run (D15), so no activity that shows over the lock screen
@@ -640,7 +658,15 @@ stores and the log (D3). A separate module gives it that:
   ":app"`. It compiles against the app's classes, and its APK runs as
   instrumentation inside the app's process, with the app's class loader.
   `CodecApplier.get(context)` in the snippet returns the instance the app's
-  service and activities use.
+  service and activities use (checked on every phone).
+- Only the app's own classes are on its compile classpath. The libraries it
+  shares with the app, like coroutines and serialization, are `compileOnly`,
+  since they come from the app at runtime. The class loader looks in the
+  snippet's APK first, so libraries both contain must have the same version,
+  which the version catalog keeps.
+- The snippet runs with the app's permissions, and its server needs a local
+  socket. The debug build's manifest adds `INTERNET` for that; the release
+  build doesn't have it.
 - `testInstrumentationRunner = "com.google.android.mobly.snippet.SnippetRunner"`,
   the dependency `com.google.android.mobly:mobly-snippet-lib`, the snippet
   classes in the manifest's `mobly-snippets` meta-data, application id
@@ -656,7 +682,7 @@ stores and the log (D3). A separate module gives it that:
   `AndroidJUnitRunner` for the UI tests, which is the other reason the snippet
   doesn't go there.
 - The release build contains none of it; the debug build only adds
-  `TestLabelReceiver`.
+  `TestLabelReceiver` and the `INTERNET` permission.
 
 RPCs: `applyCodec` (through `CodecApplier`, returns the resolution),
 `setCodecDirectly` (bypassing the applier, like another app would),
@@ -695,9 +721,10 @@ Each step ends with something that runs and is committed on its own. A step
 needs the ones before it unless it says otherwise.
 
 0. **Testbed preparation** (by hand, once): pair every phone with the
-   Qudelix. Done.
+   Qudelix and connect it once from the phone's Bluetooth settings. Done.
 1. **Spike** — answer the unknowns that change the design, and write the
-   answers into this document:
+   answers into this document. Done; the answers are in the sections above
+   and in section 12:
    1. Snippet: a `:snippet` module with one RPC (`getPending`) loads on every
       phone and sees the app's instance. What loading and unloading do to the
       process and the stopped state.
@@ -771,27 +798,50 @@ P2 for that reason. What stays manual: looking at the screenshots.
 
 ## 12. Observations from the testbed
 
-Checked on 2026-10-27 while writing this concept:
+Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 
 - The second Pixel runs API 32, not 31.
 - The debug build on the API 32 Pixel predated the shared `CodecApplier`: its
   log has `CANCELLED` events with the message "applier closed", which the
   current code doesn't write.
-- The API 28 Pixel had no bond with the Qudelix; it has been paired since.
 - On the API 32 Pixel, turning Bluetooth on made the companion device manager
   start a BLE scan filtered on the Qudelix's address. `DEVICE_APPEARED` came
   less than a second later, without a classic connection; `DEVICE_DISAPPEARED`
   came 7–8 s after the Qudelix or the phone turned Bluetooth off.
-- Neither turning Bluetooth on nor `qudelix5k.py cycle` connected A2DP to that
-  Pixel within 45 s.
+- Neither turning Bluetooth on nor `qudelix5k.py cycle` connected A2DP to the
+  API 32 Pixel or the S24: their most recently active A2DP device wasn't the
+  Qudelix. After one connect from the Bluetooth settings, both connect within
+  6–8 s of Bluetooth turning on, and a `cycle` reconnects within seconds.
+- The phones' own codec with the Qudelix is LDAC 96 kHz, 32-bit on both
+  Pixels. The S24 had the app's preferred codec applied, LDAC 44.1 kHz,
+  24-bit, so its own choice is still to record.
+- `pm clear` on API 28 and 32: data deleted, process ended, permission revoked
+  with its flags cleared, link kept, package not stopped. On API 32 the app
+  still got `DEVICE_APPEARED` afterwards, so observing survives it too.
+- `pm set-permission-flags` and `clear-permission-flags` don't exist on API 32.
+- On the S24 `am kill` didn't end the app while its companion service was
+  bound (oom adj 201); `run-as … kill -9` did, without root. The system bound
+  the service again 3 s later and delivered `onDeviceAppeared`.
+- On the S24 with its Bluetooth off, the companion device manager still sees
+  the Qudelix over BLE. The app's log has `DEVICE_APPEARED` and
+  `DEVICE_DISAPPEARED` every 15–20 s, each operation resolving
+  `PROFILE_UNAVAILABLE`.
 - `cmd companiondevice` offers `list`, `associate` and `disassociate` on API 28
-  and 32. `cmd bluetooth_manager` doesn't exist there.
-- With no device connected, the A2DP part of `dumpsys bluetooth_manager` on
-  API 32 lists only the codec priorities, so the codec parser still needs a
-  dump with a connected device from each phone.
+  and 32; associating works on 28. Its `list` output differs on API 36 (a
+  table with ids and lower case addresses). `cmd bluetooth_manager` doesn't
+  exist on API 28 and 32; on the S24 it only switches the adapter and its BLE
+  mode.
+- The snippet loads on every phone, shares the app's class loader, restarts
+  the app at foreground priority (oom adj 0), and unloading it ends the
+  process without stopping the package. It needed `INTERNET` in the app's
+  debug manifest.
+- The shared UI test passes with Robolectric and with `am instrument` on every
+  phone; `am instrument` doesn't leave the package stopped either.
 - `TestLabelReceiver` returns before touching the log when the broadcast has
   no label, but the broadcast still starts the process. That's what takes the
   package out of the stopped state without writing to the log.
+- Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
+  the companion device outputs from every phone are in `mobly_tests/testdata`.
 
 ## 13. Decisions
 
@@ -814,7 +864,7 @@ Checked on 2026-10-27 while writing this concept:
 - **D9** Fixtures link with `cmd companiondevice associate`; the system dialog
   only appears in E3 and E6.
 - **D10** The manual test records are deleted once their cases are automated.
-- **D11** The baseline codec is the phone's own choice, restored by a
+- **D11** The baseline codec is the phone's own choice, restored by a full
   reconnect. Tests that need another codec use SBC 44.1 kHz, 16-bit, or, where
   the phone's own choice is SBC, the first other codec in the capabilities.
 - **D12** A broken baseline before a test is repaired and reported as a leak of
