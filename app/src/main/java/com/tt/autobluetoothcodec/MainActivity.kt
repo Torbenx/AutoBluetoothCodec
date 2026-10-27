@@ -77,7 +77,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -86,13 +85,52 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import java.util.TreeMap
 
+/** Whether the app has the Nearby devices permission, and whether it may still ask for it. */
+internal enum class PermissionState { GRANTED, DENIED, PERMANENTLY_DENIED }
+
+/** A connected device as the main screen shows it. */
+internal data class DeviceData(
+    val device: BluetoothDevice,
+    val name: String,
+    val androidCodecConfig: AndroidCodecConfig?,
+    // null if the codec is unknown to this app or no codec status is available
+    val codecConfig: CodecConfig?,
+    val configMasks: ArrayList<A2dpProfileUtil.ConfigMask>,
+    // false if the Bluetooth stack refused to report the codec status
+    val statusReadable: Boolean,
+    val associationRequired: Boolean,
+    val associated: Boolean,
+    val preferredConfig: CodecConfig?,
+    // Why the codec status couldn't be read, null if it was read
+    val readError: String? = null,
+)
+
+/** Everything the main screen shows, provided by [MainActivity]. */
+internal data class MainScreenState(
+    val permissionState: PermissionState,
+    val devices: List<DeviceData>,
+    val canAssociate: Boolean,
+    val associationInProgress: Boolean,
+    val showDevelopmentOptions: Boolean,
+)
+
+/** What the main screen's controls do, implemented by [MainActivity]. */
+internal interface MainScreenActions {
+    fun requestPermission()
+    fun openAppSettings()
+    fun openLog()
+    fun setCodec(device: BluetoothDevice, config: CodecConfig)
+    fun savePreferred(device: BluetoothDevice, config: CodecConfig)
+    fun restorePreferred(device: BluetoothDevice, config: CodecConfig)
+    fun deletePreferred(device: BluetoothDevice)
+    fun link(device: BluetoothDevice)
+    fun unlink(device: BluetoothDevice)
+}
+
 class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     companion object {
         private const val TAG = "MainActivity"
         private const val COMPANION_TAG = "CompanionAssociation"
-
-        // Not const, a constant false condition would prevent the smart casts in the guarded blocks
-        private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
         // Kept per process, so the activity being recreated doesn't log the same state again
         private var loggedPermissionState: PermissionState? = null
@@ -115,8 +153,6 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
     }
 
-    private enum class PermissionState { GRANTED, DENIED, PERMANENTLY_DENIED }
-
     // Development options are only shown in debuggable builds
     private val showDevelopmentOptions by lazy {
         (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -126,6 +162,18 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     private val applier by lazy { CodecApplier.get(this) }
 
     private var permissionState by mutableStateOf(PermissionState.DENIED)
+
+    private val actions = object : MainScreenActions {
+        override fun requestPermission() = requestBluetoothPermission()
+        override fun openAppSettings() = this@MainActivity.openAppSettings()
+        override fun openLog() = startActivity(Intent(this@MainActivity, LogActivity::class.java))
+        override fun setCodec(device: BluetoothDevice, config: CodecConfig) = setCodecConfig(device, config)
+        override fun savePreferred(device: BluetoothDevice, config: CodecConfig) = savePreferredConfig(device, config)
+        override fun restorePreferred(device: BluetoothDevice, config: CodecConfig) = restorePreferredConfig(device, config)
+        override fun deletePreferred(device: BluetoothDevice) = deletePreferredConfig(device)
+        override fun link(device: BluetoothDevice) = linkDevice(device)
+        override fun unlink(device: BluetoothDevice) = unlinkDevice(device)
+    }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -164,7 +212,18 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             requestBluetoothPermission()
         }
 
-        setContent { Foo() }
+        setContent {
+            MainScreen(
+                MainScreenState(
+                    permissionState = permissionState,
+                    devices = connectedDevices,
+                    canAssociate = PermissionUtil.canAssociate(this),
+                    associationInProgress = associationInProgress,
+                    showDevelopmentOptions = showDevelopmentOptions
+                ),
+                actions
+            )
+        }
 
         lifecycleScope.launch {
             // Shows the codec as soon as an apply starts or ends, instead of on the next poll
@@ -399,22 +458,6 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         pullBluetoothState()
     }
 
-    data class DeviceData(
-        val device: BluetoothDevice,
-        val name: String,
-        val androidCodecConfig: AndroidCodecConfig?,
-        // null if the codec is unknown to this app or no codec status is available
-        val codecConfig: CodecConfig?,
-        val configMasks: ArrayList<A2dpProfileUtil.ConfigMask>,
-        // false if the Bluetooth stack refused to report the codec status
-        val statusReadable: Boolean,
-        val associationRequired: Boolean,
-        val associated: Boolean,
-        val preferredConfig: CodecConfig?,
-        // Why the codec status couldn't be read, null if it was read
-        val readError: String? = null,
-    )
-
     private var a2dpProfile: BluetoothA2dp? = null
     private var profileRequested = false
     private var handler: Handler? = null
@@ -505,538 +548,541 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
         handler!!.removeCallbacks(timer())
     }
+}
 
-    @Composable
-    private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
-        val color = if (selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.onBackground
+// Not const, a constant false condition would prevent the smart casts in the guarded blocks
+private val SHOW_UNCONFIGURABLE_OPTIONS = false
+
+@Composable
+private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
+    val color = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onBackground
+    }
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            border = BorderStroke(1.dp, color = color),
+            enabled = clickable,
+            onClick = onClick,
+            modifier = Modifier.graphicsLayer(alpha = if (enabled) 1f else 0.38f)
+        ) {
+            Text(
+                text,
+                Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                color = color,
+                style = MaterialTheme.typography.labelLarge
+            )
         }
-        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, color = color),
-                enabled = clickable,
-                onClick = onClick,
-                modifier = Modifier.graphicsLayer(alpha = if (enabled) 1f else 0.38f)
-            ) {
-                Text(
-                    text,
-                    Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                    color = color,
-                    style = MaterialTheme.typography.labelLarge
+    }
+}
+
+@Composable
+private fun ActiveConfigChip(text: String) {
+    ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
+}
+
+private data class StatusChipColors(
+    val labelBackgroundColor: Color,
+    val labelTextColor: Color,
+    val buttonBackgroundColor: Color,
+    val buttonTextColor: Color
+)
+
+@Composable
+private fun statusChipColors(
+    labelBackgroundColor: Color,
+    labelTextColor: Color,
+    buttonBackgroundColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    buttonTextColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
+): StatusChipColors {
+    return StatusChipColors(labelBackgroundColor, labelTextColor, buttonBackgroundColor, buttonTextColor)
+}
+
+@Composable
+private fun StatusChip(
+    text: String,
+    colors: StatusChipColors,
+    isButton: Boolean,
+    onButtonClick: () -> Unit
+) {
+    val transition = updateTransition(isButton, "buttonState")
+    val duration: @Composable (Transition.Segment<Boolean>.() -> Int) = {
+        when {
+            false isTransitioningTo true -> 500
+            else -> 500
+        }
+    }
+
+    val backgroundColor by transition.animateColor(
+        label = "backgroundColor",
+        transitionSpec = { tween(duration()) }
+    ) { state -> if (state) colors.buttonBackgroundColor else colors.labelBackgroundColor }
+
+    val textColor by transition.animateColor(
+        label = "textColor",
+        transitionSpec = { tween(duration()) }
+    ) { state -> if (state) colors.buttonTextColor else colors.labelTextColor }
+
+    val cornerRadius by transition.animateDp(
+        label = "cornerRadius",
+        transitionSpec = { tween(duration()) }
+    ) { state -> if (state) 20.dp else 8.dp }
+
+    val horizontalPadding = if (isButton) 24.dp else 16.dp
+
+    val verticalPadding = if (isButton) 16.dp else 6.dp
+
+    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+        Surface(
+            shape = RoundedCornerShape(cornerRadius),
+            color = backgroundColor,
+            onClick = onButtonClick,
+            enabled = isButton,
+            modifier = Modifier
+                .animateContentSize(
+                    animationSpec = tween(500),
+                    alignment = Alignment.CenterEnd
                 )
-            }
-        }
-    }
-
-    @Composable
-    private fun ActiveConfigChip(text: String) {
-        ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
-    }
-
-    private data class StatusChipColors(
-        val labelBackgroundColor: Color,
-        val labelTextColor: Color,
-        val buttonBackgroundColor: Color,
-        val buttonTextColor: Color
-    )
-
-    @Composable
-    private fun statusChipColors(
-        labelBackgroundColor: Color,
-        labelTextColor: Color,
-        buttonBackgroundColor: Color = MaterialTheme.colorScheme.primaryContainer,
-        buttonTextColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
-    ): StatusChipColors {
-        return StatusChipColors(labelBackgroundColor, labelTextColor, buttonBackgroundColor, buttonTextColor)
-    }
-
-    @Composable
-    private fun StatusChip(
-        text: String,
-        colors: StatusChipColors,
-        isButton: Boolean,
-        onButtonClick: () -> Unit
-    ) {
-        val transition = updateTransition(isButton, "buttonState")
-        val duration: @Composable (Transition.Segment<Boolean>.() -> Int) = {
-            when {
-                false isTransitioningTo true -> 500
-                else -> 500
-            }
-        }
-
-        val backgroundColor by transition.animateColor(
-            label = "backgroundColor",
-            transitionSpec = { tween(duration()) }
-        ) { state -> if (state) colors.buttonBackgroundColor else colors.labelBackgroundColor }
-
-        val textColor by transition.animateColor(
-            label = "textColor",
-            transitionSpec = { tween(duration()) }
-        ) { state -> if (state) colors.buttonTextColor else colors.labelTextColor }
-
-        val cornerRadius by transition.animateDp(
-            label = "cornerRadius",
-            transitionSpec = { tween(duration()) }
-        ) { state -> if (state) 20.dp else 8.dp }
-
-        val horizontalPadding = if (isButton) 24.dp else 16.dp
-
-        val verticalPadding = if (isButton) 16.dp else 6.dp
-
-        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-            Surface(
-                shape = RoundedCornerShape(cornerRadius),
-                color = backgroundColor,
-                onClick = onButtonClick,
-                enabled = isButton,
-                modifier = Modifier
+        ) {
+            Text(
+                text,
+                Modifier
                     .animateContentSize(
                         animationSpec = tween(500),
-                        alignment = Alignment.CenterEnd
+                        alignment = Alignment.Center
                     )
-            ) {
-                Text(
-                    text,
-                    Modifier
-                        .animateContentSize(
-                            animationSpec = tween(500),
-                            alignment = Alignment.Center
-                        )
-                        .padding(horizontal = horizontalPadding, vertical = verticalPadding),
-                    color = textColor,
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-        }
-    }
-
-    data class ConfigRowItem(
-        val text: String,
-        val value: Int,
-        val enabled: Boolean
-    )
-
-    @OptIn(ExperimentalLayoutApi::class)
-    @Composable
-    private fun ConfigSelectRow(title: String, items: List<ConfigRowItem>, selectedValue: Int, onSelected: (Int) -> Unit) {
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Spacer(Modifier.height(4.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                for (item in items) {
-                    ConfigChip(
-                        text = item.text,
-                        selected = item.value == selectedValue,
-                        enabled = item.enabled,
-                        clickable = item.enabled,
-                        onClick = { onSelected(item.value) },
-                    )
-                }
-            }
-        }
-    }
-
-    private fun isCodecTypeSupported(device: DeviceData, @CodecConfig.CodecType newCodecType: Int): Boolean {
-        return device.configMasks.any { it.codecType == newCodecType }
-    }
-
-    private fun findSelectableConfig(device: DeviceData, @CodecConfig.CodecType newCodecType: Int): CodecConfig {
-        val validConfigs = TreeMap<Int, CodecConfig>()
-        val curSampleRate = device.androidCodecConfig?.sampleRate ?: CodecConfig.SAMPLE_RATE_NONE
-        val curBitsPerSample = device.androidCodecConfig?.bitsPerSample ?: CodecConfig.BITS_PER_SAMPLE_NONE
-        for (configMask in device.configMasks) {
-            if (configMask.codecType != newCodecType)
-                continue
-
-            val newConfig = CodecConfig.makeCodecConfig(newCodecType)!!
-            var score = 0
-
-            if (configMask.isSampleRateSupported(curSampleRate)) {
-                score += 2
-                newConfig.sampleRate = curSampleRate
-            } else {
-                for (sampleRate in CodecConfig.SAMPLE_RATES) {
-                    if (configMask.isSampleRateSupported(sampleRate)) {
-                        newConfig.sampleRate = sampleRate
-                        break
-                    }
-                }
-            }
-            if (configMask.isSampleSizeSupported(curBitsPerSample)) {
-                score += 1
-                newConfig.bitsPerSample = curBitsPerSample
-            } else {
-                for (bitsPerSample in CodecConfig.SAMPLE_SIZES) {
-                    if (configMask.isSampleSizeSupported(bitsPerSample)) {
-                        newConfig.bitsPerSample = bitsPerSample
-                        break
-                    }
-                }
-            }
-
-            validConfigs.putIfAbsent(score, newConfig)
-        }
-        return validConfigs.lastEntry()!!.value
-    }
-
-    private fun isConfigSelectable(
-        device: DeviceData,
-        @CodecConfig.CodecType codecType: Int,
-        @CodecConfig.SampleRate sampleRate: Int,
-        @CodecConfig.BitsPerSample bitsPerSample: Int
-    ): Boolean {
-        for (configMask in device.configMasks) {
-            if (configMask.codecType == codecType &&
-                configMask.isSampleRateSupported(sampleRate) &&
-                configMask.isSampleSizeSupported(bitsPerSample)) {
-                return true
-            }
-        }
-        return false
-    }
-
-    private fun isSampleRateSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.SampleRate sampleRate: Int): Boolean {
-        return isConfigSelectable(device, config.getCodecType(), sampleRate, config.bitsPerSample)
-    }
-
-    private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.BitsPerSample bitsPerSample: Int): Boolean {
-        return isConfigSelectable(device, config.getCodecType(), config.sampleRate, bitsPerSample)
-    }
-
-    @Composable
-    private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
-        Column {
-            val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
-            ConfigSelectRow(
-                "Codec",
-                CodecConfig.CODEC_TYPES.map {
-                    ConfigRowItem(CodecConfig.getCodecName(it)!!, it, isCodecTypeSupported(device, it))
-                },
-                currentCodecType,
-                onSelected = {
-                    if (it != currentCodecType) {
-                        onConfigChange(findSelectableConfig(device, it))
-                    }
-                }
+                    .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+                color = textColor,
+                style = MaterialTheme.typography.labelLarge
             )
-
-            // The current codec is unknown to this app, so only offer switching to a known one
-            val config = device.codecConfig ?: return@Column
-
-            Spacer(Modifier.height(16.dp))
-            ConfigSelectRow(
-                "Sample Rate",
-                CodecConfig.SAMPLE_RATES.map {
-                    ConfigRowItem("${CodecConfig.getSampleRate(it)} Hz", it, isSampleRateSelectable(device, config, it))
-                },
-                config.sampleRate,
-                onSelected = {
-                    val newConfig = config.clone() as CodecConfig
-                    newConfig.sampleRate = it
-                    onConfigChange(newConfig)
-                }
-            )
-
-            Spacer(Modifier.height(16.dp))
-            ConfigSelectRow(
-                "Bits per Sample",
-                CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}", it, isSampleSizeSelectable(device, config, it)) },
-                config.bitsPerSample,
-                onSelected = {
-                    val newConfig = config.clone() as CodecConfig
-                    newConfig.bitsPerSample = it
-                    onConfigChange(newConfig)
-                }
-            )
-
-            if (config is LDACCodecConfig) {
-                Spacer(Modifier.height(16.dp))
-                ConfigSelectRow(
-                    "Bitrate",
-                    LDACCodecConfig.BITRATES.map {
-                        ConfigRowItem(LDACCodecConfig.getFixedBitrate(it, config.sampleRate)?.toString()?.plus(" kbps") ?: "Adaptive", it, true)
-                    },
-                    if (config.bitrate == LDACCodecConfig.BITRATE_SYSTEM_DEFAULT) LDACCodecConfig.BITRATE_ADAPTIVE else config.bitrate,
-                    onSelected = {
-                        val newConfig = config.clone() as LDACCodecConfig
-                        newConfig.bitrate = it
-                        onConfigChange(newConfig)
-                    }
-                )
-            }
-
-            // This is in the AOSP bluetooth source but appears to not be configurable
-            if (SHOW_UNCONFIGURABLE_OPTIONS && config is AACCodecConfig) {
-                Spacer(Modifier.height(16.dp))
-                ConfigSelectRow(
-                    "Variable Bitrate",
-                    arrayListOf(
-                        ConfigRowItem("Disabled", AACCodecConfig.VARIABLE_BITRATE_DISABLED, true),
-                        ConfigRowItem("Very Low", AACCodecConfig.VARIABLE_BITRATE_VERY_LOW, true),
-                        ConfigRowItem("Low", AACCodecConfig.VARIABLE_BITRATE_LOW, true),
-                        ConfigRowItem("Medium", AACCodecConfig.VARIABLE_BITRATE_MEDIUM, true),
-                        ConfigRowItem("High", AACCodecConfig.VARIABLE_BITRATE_HIGH, true),
-                        ConfigRowItem("Very High", AACCodecConfig.VARIABLE_BITRATE_VERY_HIGH, true),
-                    ),
-                    config.variableBitrate,
-                    onSelected = {
-                        val newConfig = config.clone() as AACCodecConfig
-                        newConfig.variableBitrate = it
-                        onConfigChange(newConfig)
-                    }
-                )
-            }
-
-            // This is in the AOSP bluetooth source but appears to not be configurable
-            if (SHOW_UNCONFIGURABLE_OPTIONS && config is OpusCodecConfig) {
-                Spacer(Modifier.height(16.dp))
-                ConfigSelectRow(
-                    "Encode Complexity",
-                    listOf(ConfigRowItem("Default", OpusCodecConfig.ENCODE_COMPLEXITY_SYSTEM_DEFAULT, true)) +
-                    (0..9).map { ConfigRowItem(it.toString(), it, true) },
-                    config.encodeComplexity,
-                    onSelected = {
-                        val newConfig = config.clone() as OpusCodecConfig
-                        newConfig.encodeComplexity = it
-                        onConfigChange(newConfig)
-                    }
-                )
-            }
         }
     }
+}
 
-    @OptIn(ExperimentalLayoutApi::class)
-    @Composable
-    private fun DeviceCard(device: DeviceData, initialExtended: Boolean) {
-        var extended by remember { mutableStateOf(initialExtended) }
+private data class ConfigRowItem(
+    val text: String,
+    val value: Int,
+    val enabled: Boolean
+)
 
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            shadowElevation = 6.dp,
-            shape = CardDefaults.elevatedShape,
-            onClick = { extended = !extended },
-            enabled = true
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ConfigSelectRow(title: String, items: List<ConfigRowItem>, selectedValue: Int, onSelected: (Int) -> Unit) {
+    Column {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(modifier = Modifier.padding(10.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Text(device.name, style = MaterialTheme.typography.titleLarge)
-                    Spacer(Modifier.weight(1f).defaultMinSize(minWidth = 8.dp))
-
-                    val preferredConfig = device.preferredConfig
-                    val currentConfig = device.codecConfig
-                    val isPreferredActive = preferredConfig != null && preferredConfig == currentConfig
-
-                    // A codec unknown to this app can't be saved as preference
-                    if (device.statusReadable && currentConfig != null) {
-                        StatusChip(
-                            if (isPreferredActive) "Preferred Codec" else "Save As Preferred Codec",
-                            statusChipColors(
-                                labelBackgroundColor = Color(0xFFE8F5E9),
-                                labelTextColor = Color(0xFF388E3C)
-                            ),
-                            isButton = !isPreferredActive,
-                            onButtonClick = { savePreferredConfig(device.device, currentConfig) }
-                        )
-                    }
-                    if (preferredConfig != null || (showDevelopmentOptions && device.associated)) {
-                        DeviceMenu(device, isPreferredActive)
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                // Choosing a codec requests the association anyway, so only ask up front if the
-                // codec can't be shown or the preferred codec can't be applied automatically
-                if (!device.statusReadable || (device.associationRequired && device.preferredConfig != null)) {
-                    AssociationRow(device)
-                    Spacer(Modifier.height(8.dp))
-                }
-                AnimatedVisibility(!extended && device.statusReadable) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        val config = device.codecConfig
-                        if (config == null) {
-                            ActiveConfigChip(if (device.androidCodecConfig != null) "Unsupported codec" else "No codec information")
-                            return@FlowRow
-                        }
-                        CodecConfig.getCodecName(config.getCodecType())?.let {
-                            ActiveConfigChip(it)
-                        }
-                        CodecConfig.getSampleRate(config.sampleRate)?.let {
-                            ActiveConfigChip("$it Hz")
-                        }
-                        CodecConfig.getBitsPerSample(config.bitsPerSample)?.let {
-                            ActiveConfigChip("$it bits/sample")
-                        }
-                        if (config is LDACCodecConfig) {
-                            if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
-                                ActiveConfigChip("Adaptive")
-                            } else {
-                                LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)
-                                    ?.let { ActiveConfigChip("$it kbps") }
-                                    ?: LDACCodecConfig.getFixedBitrate(config.bitrate)
-                                        ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
-                            }
-                        }
-                    }
-                }
-                AnimatedVisibility(extended && device.statusReadable) {
-                    CodecConfigSelection(
-                        device,
-                        onConfigChange = { setCodecConfig(device.device, it) }
-                    )
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean) {
-        var expanded by remember { mutableStateOf(false) }
-        val preferredConfig = device.preferredConfig
-        Box {
-            IconButton(onClick = { expanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More options")
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                if (preferredConfig != null && !isPreferredActive) {
-                    DropdownMenuItem(
-                        text = { Text("Restore Preferred Codec") },
-                        onClick = {
-                            expanded = false
-                            restorePreferredConfig(device.device, preferredConfig)
-                        }
-                    )
-                }
-                if (preferredConfig != null) {
-                    DropdownMenuItem(
-                        text = { Text("Delete Preferred Codec") },
-                        onClick = {
-                            expanded = false
-                            deletePreferredConfig(device.device)
-                        }
-                    )
-                }
-                if (showDevelopmentOptions && device.associated) {
-                    DropdownMenuItem(
-                        text = { Text("Unlink Device (Debug)") },
-                        onClick = {
-                            expanded = false
-                            unlinkDevice(device.device)
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun AssociationRow(device: DeviceData) {
-        Column {
-            if (!PermissionUtil.canAssociate(this@MainActivity)) {
-                Text(
-                    "This phone can't link devices, so the codec of ${device.name} can't be changed.",
-                    style = MaterialTheme.typography.bodyMedium
+            for (item in items) {
+                ConfigChip(
+                    text = item.text,
+                    selected = item.value == selectedValue,
+                    enabled = item.enabled,
+                    clickable = item.enabled,
+                    onClick = { onSelected(item.value) },
                 )
-                return@Column
             }
+        }
+    }
+}
+
+private fun isCodecTypeSupported(device: DeviceData, @CodecConfig.CodecType newCodecType: Int): Boolean {
+    return device.configMasks.any { it.codecType == newCodecType }
+}
+
+private fun findSelectableConfig(device: DeviceData, @CodecConfig.CodecType newCodecType: Int): CodecConfig {
+    val validConfigs = TreeMap<Int, CodecConfig>()
+    val curSampleRate = device.androidCodecConfig?.sampleRate ?: CodecConfig.SAMPLE_RATE_NONE
+    val curBitsPerSample = device.androidCodecConfig?.bitsPerSample ?: CodecConfig.BITS_PER_SAMPLE_NONE
+    for (configMask in device.configMasks) {
+        if (configMask.codecType != newCodecType)
+            continue
+
+        val newConfig = CodecConfig.makeCodecConfig(newCodecType)!!
+        var score = 0
+
+        if (configMask.isSampleRateSupported(curSampleRate)) {
+            score += 2
+            newConfig.sampleRate = curSampleRate
+        } else {
+            for (sampleRate in CodecConfig.SAMPLE_RATES) {
+                if (configMask.isSampleRateSupported(sampleRate)) {
+                    newConfig.sampleRate = sampleRate
+                    break
+                }
+            }
+        }
+        if (configMask.isSampleSizeSupported(curBitsPerSample)) {
+            score += 1
+            newConfig.bitsPerSample = curBitsPerSample
+        } else {
+            for (bitsPerSample in CodecConfig.SAMPLE_SIZES) {
+                if (configMask.isSampleSizeSupported(bitsPerSample)) {
+                    newConfig.bitsPerSample = bitsPerSample
+                    break
+                }
+            }
+        }
+
+        validConfigs.putIfAbsent(score, newConfig)
+    }
+    return validConfigs.lastEntry()!!.value
+}
+
+private fun isConfigSelectable(
+    device: DeviceData,
+    @CodecConfig.CodecType codecType: Int,
+    @CodecConfig.SampleRate sampleRate: Int,
+    @CodecConfig.BitsPerSample bitsPerSample: Int
+): Boolean {
+    for (configMask in device.configMasks) {
+        if (configMask.codecType == codecType &&
+            configMask.isSampleRateSupported(sampleRate) &&
+            configMask.isSampleSizeSupported(bitsPerSample)) {
+            return true
+        }
+    }
+    return false
+}
+
+private fun isSampleRateSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.SampleRate sampleRate: Int): Boolean {
+    return isConfigSelectable(device, config.getCodecType(), sampleRate, config.bitsPerSample)
+}
+
+private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @CodecConfig.BitsPerSample bitsPerSample: Int): Boolean {
+    return isConfigSelectable(device, config.getCodecType(), config.sampleRate, bitsPerSample)
+}
+
+@Composable
+private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
+    Column {
+        val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
+        ConfigSelectRow(
+            "Codec",
+            CodecConfig.CODEC_TYPES.map {
+                ConfigRowItem(CodecConfig.getCodecName(it)!!, it, isCodecTypeSupported(device, it))
+            },
+            currentCodecType,
+            onSelected = {
+                if (it != currentCodecType) {
+                    onConfigChange(findSelectableConfig(device, it))
+                }
+            }
+        )
+
+        // The current codec is unknown to this app, so only offer switching to a known one
+        val config = device.codecConfig ?: return@Column
+
+        Spacer(Modifier.height(16.dp))
+        ConfigSelectRow(
+            "Sample Rate",
+            CodecConfig.SAMPLE_RATES.map {
+                ConfigRowItem("${CodecConfig.getSampleRate(it)} Hz", it, isSampleRateSelectable(device, config, it))
+            },
+            config.sampleRate,
+            onSelected = {
+                val newConfig = config.clone() as CodecConfig
+                newConfig.sampleRate = it
+                onConfigChange(newConfig)
+            }
+        )
+
+        Spacer(Modifier.height(16.dp))
+        ConfigSelectRow(
+            "Bits per Sample",
+            CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}", it, isSampleSizeSelectable(device, config, it)) },
+            config.bitsPerSample,
+            onSelected = {
+                val newConfig = config.clone() as CodecConfig
+                newConfig.bitsPerSample = it
+                onConfigChange(newConfig)
+            }
+        )
+
+        if (config is LDACCodecConfig) {
+            Spacer(Modifier.height(16.dp))
+            ConfigSelectRow(
+                "Bitrate",
+                LDACCodecConfig.BITRATES.map {
+                    ConfigRowItem(LDACCodecConfig.getFixedBitrate(it, config.sampleRate)?.toString()?.plus(" kbps") ?: "Adaptive", it, true)
+                },
+                if (config.bitrate == LDACCodecConfig.BITRATE_SYSTEM_DEFAULT) LDACCodecConfig.BITRATE_ADAPTIVE else config.bitrate,
+                onSelected = {
+                    val newConfig = config.clone() as LDACCodecConfig
+                    newConfig.bitrate = it
+                    onConfigChange(newConfig)
+                }
+            )
+        }
+
+        // This is in the AOSP bluetooth source but appears to not be configurable
+        if (SHOW_UNCONFIGURABLE_OPTIONS && config is AACCodecConfig) {
+            Spacer(Modifier.height(16.dp))
+            ConfigSelectRow(
+                "Variable Bitrate",
+                arrayListOf(
+                    ConfigRowItem("Disabled", AACCodecConfig.VARIABLE_BITRATE_DISABLED, true),
+                    ConfigRowItem("Very Low", AACCodecConfig.VARIABLE_BITRATE_VERY_LOW, true),
+                    ConfigRowItem("Low", AACCodecConfig.VARIABLE_BITRATE_LOW, true),
+                    ConfigRowItem("Medium", AACCodecConfig.VARIABLE_BITRATE_MEDIUM, true),
+                    ConfigRowItem("High", AACCodecConfig.VARIABLE_BITRATE_HIGH, true),
+                    ConfigRowItem("Very High", AACCodecConfig.VARIABLE_BITRATE_VERY_HIGH, true),
+                ),
+                config.variableBitrate,
+                onSelected = {
+                    val newConfig = config.clone() as AACCodecConfig
+                    newConfig.variableBitrate = it
+                    onConfigChange(newConfig)
+                }
+            )
+        }
+
+        // This is in the AOSP bluetooth source but appears to not be configurable
+        if (SHOW_UNCONFIGURABLE_OPTIONS && config is OpusCodecConfig) {
+            Spacer(Modifier.height(16.dp))
+            ConfigSelectRow(
+                "Encode Complexity",
+                listOf(ConfigRowItem("Default", OpusCodecConfig.ENCODE_COMPLEXITY_SYSTEM_DEFAULT, true)) +
+                (0..9).map { ConfigRowItem(it.toString(), it, true) },
+                config.encodeComplexity,
+                onSelected = {
+                    val newConfig = config.clone() as OpusCodecConfig
+                    newConfig.encodeComplexity = it
+                    onConfigChange(newConfig)
+                }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: MainScreenState, actions: MainScreenActions) {
+    var extended by remember { mutableStateOf(initialExtended) }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        shadowElevation = 6.dp,
+        shape = CardDefaults.elevatedShape,
+        onClick = { extended = !extended },
+        enabled = true
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text(device.name, style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.weight(1f).defaultMinSize(minWidth = 8.dp))
+
+                val preferredConfig = device.preferredConfig
+                val currentConfig = device.codecConfig
+                val isPreferredActive = preferredConfig != null && preferredConfig == currentConfig
+
+                // A codec unknown to this app can't be saved as preference
+                if (device.statusReadable && currentConfig != null) {
+                    StatusChip(
+                        if (isPreferredActive) "Preferred Codec" else "Save As Preferred Codec",
+                        statusChipColors(
+                            labelBackgroundColor = Color(0xFFE8F5E9),
+                            labelTextColor = Color(0xFF388E3C)
+                        ),
+                        isButton = !isPreferredActive,
+                        onButtonClick = { actions.savePreferred(device.device, currentConfig) }
+                    )
+                }
+                if (preferredConfig != null || (state.showDevelopmentOptions && device.associated)) {
+                    DeviceMenu(device, isPreferredActive, state.showDevelopmentOptions, actions)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            // Choosing a codec requests the association anyway, so only ask up front if the
+            // codec can't be shown or the preferred codec can't be applied automatically
+            if (!device.statusReadable || (device.associationRequired && device.preferredConfig != null)) {
+                AssociationRow(device, state.canAssociate, state.associationInProgress, actions)
+                Spacer(Modifier.height(8.dp))
+            }
+            AnimatedVisibility(!extended && device.statusReadable) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val config = device.codecConfig
+                    if (config == null) {
+                        ActiveConfigChip(if (device.androidCodecConfig != null) "Unsupported codec" else "No codec information")
+                        return@FlowRow
+                    }
+                    CodecConfig.getCodecName(config.getCodecType())?.let {
+                        ActiveConfigChip(it)
+                    }
+                    CodecConfig.getSampleRate(config.sampleRate)?.let {
+                        ActiveConfigChip("$it Hz")
+                    }
+                    CodecConfig.getBitsPerSample(config.bitsPerSample)?.let {
+                        ActiveConfigChip("$it bits/sample")
+                    }
+                    if (config is LDACCodecConfig) {
+                        if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
+                            ActiveConfigChip("Adaptive")
+                        } else {
+                            LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)
+                                ?.let { ActiveConfigChip("$it kbps") }
+                                ?: LDACCodecConfig.getFixedBitrate(config.bitrate)
+                                    ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
+                        }
+                    }
+                }
+            }
+            AnimatedVisibility(extended && device.statusReadable) {
+                CodecConfigSelection(
+                    device,
+                    onConfigChange = { actions.setCodec(device.device, it) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevelopmentOptions: Boolean, actions: MainScreenActions) {
+    var expanded by remember { mutableStateOf(false) }
+    val preferredConfig = device.preferredConfig
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (preferredConfig != null && !isPreferredActive) {
+                DropdownMenuItem(
+                    text = { Text("Restore Preferred Codec") },
+                    onClick = {
+                        expanded = false
+                        actions.restorePreferred(device.device, preferredConfig)
+                    }
+                )
+            }
+            if (preferredConfig != null) {
+                DropdownMenuItem(
+                    text = { Text("Delete Preferred Codec") },
+                    onClick = {
+                        expanded = false
+                        actions.deletePreferred(device.device)
+                    }
+                )
+            }
+            if (showDevelopmentOptions && device.associated) {
+                DropdownMenuItem(
+                    text = { Text("Unlink Device (Debug)") },
+                    onClick = {
+                        expanded = false
+                        actions.unlink(device.device)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssociationRow(device: DeviceData, canAssociate: Boolean, associationInProgress: Boolean, actions: MainScreenActions) {
+    Column {
+        if (!canAssociate) {
             Text(
-                if (device.statusReadable) "Link ${device.name} so its preferred codec is applied when it connects."
-                else "Link ${device.name} to see and change its codec.",
+                "This phone can't link devices, so the codec of ${device.name} can't be changed.",
                 style = MaterialTheme.typography.bodyMedium
             )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { linkDevice(device.device) },
-                enabled = !associationInProgress
-            ) {
-                Text("Allow")
-            }
+            return@Column
+        }
+        Text(
+            if (device.statusReadable) "Link ${device.name} so its preferred codec is applied when it connects."
+            else "Link ${device.name} to see and change its codec.",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { actions.link(device.device) },
+            enabled = !associationInProgress
+        ) {
+            Text("Allow")
         }
     }
+}
 
-    @Composable
-    private fun PermissionRequired(modifier: Modifier) {
-        Column(
-            modifier = modifier.fillMaxSize().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+@Composable
+private fun PermissionRequired(modifier: Modifier, permissionState: PermissionState, actions: MainScreenActions) {
+    Column(
+        modifier = modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "Auto Bluetooth Codec needs the Nearby devices permission to access the codec of your Bluetooth devices.",
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center
+        )
+        Spacer(Modifier.height(16.dp))
+        if (permissionState == PermissionState.PERMANENTLY_DENIED) {
             Text(
-                "Auto Bluetooth Codec needs the Nearby devices permission to access the codec of your Bluetooth devices.",
-                style = MaterialTheme.typography.bodyLarge,
+                "Allow it in the app settings under Permissions.",
+                style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(16.dp))
-            if (permissionState == PermissionState.PERMANENTLY_DENIED) {
-                Text(
-                    "Allow it in the app settings under Permissions.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = { openAppSettings() }) {
-                    Text("Open settings")
-                }
-            } else {
-                Button(onClick = { requestBluetoothPermission() }) {
-                    Text("Grant permission")
-                }
+            Button(onClick = { actions.openAppSettings() }) {
+                Text("Open settings")
+            }
+        } else {
+            Button(onClick = { actions.requestPermission() }) {
+                Text("Grant permission")
             }
         }
     }
+}
 
-    @Composable
-    private fun AppMenu() {
-        var expanded by remember { mutableStateOf(false) }
-        Box {
-            IconButton(onClick = { expanded = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More options")
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("Log") },
-                    onClick = {
-                        expanded = false
-                        startActivity(Intent(this@MainActivity, LogActivity::class.java))
-                    }
-                )
-            }
+@Composable
+private fun AppMenu(onOpenLog: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Log") },
+                onClick = {
+                    expanded = false
+                    onOpenLog()
+                }
+            )
         }
     }
+}
 
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Preview(showBackground = true)
-    @Composable
-    private fun Foo() {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.app_name)) },
-                    actions = { AppMenu() }
-                )
-            },
-            // Also keeps the content clear of display cutouts in landscape
-            contentWindowInsets = WindowInsets.safeDrawing
-        ) { innerPadding ->
-            if (permissionState != PermissionState.GRANTED) {
-                PermissionRequired(Modifier.padding(innerPadding))
-            } else {
-                // Padding inside the scroll container, so the cards scroll behind the navigation bar
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
-                    for (device in connectedDevices) {
-                        DeviceCard(device, initialExtended = false)
-                    }
+/** The main screen, the connected devices with their codecs. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun MainScreen(state: MainScreenState, actions: MainScreenActions) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.app_name)) },
+                actions = { AppMenu(actions::openLog) }
+            )
+        },
+        // Also keeps the content clear of display cutouts in landscape
+        contentWindowInsets = WindowInsets.safeDrawing
+    ) { innerPadding ->
+        if (state.permissionState != PermissionState.GRANTED) {
+            PermissionRequired(Modifier.padding(innerPadding), state.permissionState, actions)
+        } else {
+            // Padding inside the scroll container, so the cards scroll behind the navigation bar
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
+                for (device in state.devices) {
+                    DeviceCard(device, initialExtended = false, state, actions)
                 }
             }
         }
