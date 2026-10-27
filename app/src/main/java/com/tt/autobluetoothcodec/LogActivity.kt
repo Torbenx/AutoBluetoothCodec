@@ -90,47 +90,23 @@ import java.util.Locale
 class LogActivity : ComponentActivity() {
     companion object {
         private const val TAG = "LogActivity"
-
-        // Shown in the error color
-        private val FAILURES = setOf(
-            EventType.ASSOCIATION_FAILED,
-            EventType.MAX_ATTEMPTS,
-            EventType.NO_ASSOCIATION,
-            EventType.NO_PERMISSION,
-            EventType.SECURITY_EXCEPTION,
-            EventType.PROFILE_UNAVAILABLE,
-            EventType.PROFILE_DISCONNECTED,
-            EventType.TIMEOUT,
-            EventType.ERROR,
-            EventType.OPERATION_INTERRUPTED,
-            EventType.READ_FAILED,
-            EventType.OBSERVING_FAILED,
-        )
-
-        // Their message is part of the description, so it isn't shown separately
-        private val MESSAGE_DESCRIBED = setOf(
-            EventType.PERMISSION_CHANGED,
-            EventType.OBSERVING_CHANGED,
-            EventType.TEST_LABEL,
-        )
     }
 
     private val log by lazy { EventLog.get(this) }
-    @OptIn(ExperimentalSerializationApi::class)
-    private val prettyJson = Json(from = EventLog.json) {
-        prettyPrint = true
-        prettyPrintIndent = "  "
-    }
-    private val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
-    private val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
-    private var showExportDialog by mutableStateOf(false)
-    private var showClearDialog by mutableStateOf(false)
+    private val actions = object : LogScreenActions {
+        override fun back() = finish()
+        override fun share(mode: LogExport.Mode) = shareLog(mode)
+        override fun clear() = log.clear()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableLightEdgeToEdge()
         super.onCreate(savedInstanceState)
-        setContent { LogScreen() }
+        setContent {
+            val events by log.events.collectAsState()
+            LogScreen(events, LocalDate.now(), actions)
+        }
     }
 
     private fun shareLog(mode: LogExport.Mode) {
@@ -147,425 +123,466 @@ class LogActivity : ComponentActivity() {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(intent, "Share log"))
     }
+}
 
-    /** The events of an operation in order, or a single standalone event. */
-    private class LogEntry(val events: List<LogEvent>) {
-        val first get() = events.first()
-        val isOperation get() = first.type.flow == OperationFlow.TRIGGER
-        val resolution get() = events.lastOrNull { it.type.flow == OperationFlow.RESOLUTION }
-    }
+// Shown in the error color
+private val FAILURES = setOf(
+    EventType.ASSOCIATION_FAILED,
+    EventType.MAX_ATTEMPTS,
+    EventType.NO_ASSOCIATION,
+    EventType.NO_PERMISSION,
+    EventType.SECURITY_EXCEPTION,
+    EventType.PROFILE_UNAVAILABLE,
+    EventType.PROFILE_DISCONNECTED,
+    EventType.TIMEOUT,
+    EventType.ERROR,
+    EventType.OPERATION_INTERRUPTED,
+    EventType.READ_FAILED,
+    EventType.OBSERVING_FAILED,
+)
 
-    private fun buildEntries(events: List<LogEvent>): List<LogEntry> {
-        val operations = HashMap<String, MutableList<LogEvent>>()
-        val entries = ArrayList<MutableList<LogEvent>>()
-        for (event in events) {
-            val uid = event.opUID
-            val operation = uid?.let { operations[it] }
-            if (operation != null) {
-                operation.add(event)
-            } else {
-                val entry = mutableListOf(event)
-                if (uid != null)
-                    operations[uid] = entry
-                entries.add(entry)
-            }
-        }
-        return entries.map { LogEntry(it) }
-    }
+// Their message is part of the description, so it isn't shown separately
+private val MESSAGE_DESCRIBED = setOf(
+    EventType.PERMISSION_CHANGED,
+    EventType.OBSERVING_CHANGED,
+    EventType.TEST_LABEL,
+)
 
-    private fun describe(event: LogEvent): String {
-        val config = event.config?.describe()
-        val actual = event.actual?.describe() ?: "no codec"
-        return when (event.type) {
-            EventType.DEVICE_APPEARED -> "Device connected"
-            EventType.A2DP_CONNECTED -> "Audio connected"
-            EventType.USER_SET_CODEC -> "Codec chosen: $config"
-            EventType.USER_RESTORE_PREFERRED -> "Restoring preferred codec: $config"
-            EventType.USER_SAVE_PREFERRED -> "Saving preferred codec: $config"
-            EventType.USER_LINK_DEVICE -> "Linking device"
-            EventType.SET_CODEC_CONFIG -> "Setting codec" + (event.attempt?.let { ", attempt $it" } ?: "") + ": $config"
-            EventType.VALIDATE_CODEC_CONFIG -> when {
-                event.actual == null -> "Codec change incomplete, no codec reported"
-                event.actual.own?.let { event.config?.own?.isFulfilledBy(it) } != true -> "Codec change incomplete, active: $actual"
-                else -> "Codec validated: $actual"
-            }
-            EventType.ASSOCIATION_REQUESTED -> "Asked to link the device"
-            EventType.CODEC_VERIFIED -> "Codec applied: $actual"
-            EventType.PREFERRED_SAVED -> "Preferred codec saved"
-            EventType.ASSOCIATION_CREATED -> "Device linked"
-            EventType.ASSOCIATION_FAILED -> "Linking device failed"
-            EventType.MAX_ATTEMPTS -> "Codec not applied after ${event.attempt} attempts" +
-                    (event.actual?.let { ", still ${it.describe()}" } ?: "")
-            EventType.NOT_CONNECTED -> "Audio not connected yet"
-            EventType.NO_ASSOCIATION -> "Device isn't linked"
-            EventType.NO_PREFERRED_CODEC -> "No preferred codec"
-            EventType.NO_PERMISSION -> "Nearby devices permission missing"
-            EventType.SECURITY_EXCEPTION -> "Bluetooth refused the codec change"
-            EventType.PROFILE_UNAVAILABLE -> "Bluetooth audio unavailable"
-            EventType.PROFILE_DISCONNECTED -> "Bluetooth audio service disconnected"
-            EventType.TIMEOUT -> "Timed out"
-            EventType.CANCELLED -> "Cancelled"
-            EventType.ALREADY_PENDING -> "Already in progress"
-            EventType.SUPERSEDED -> "Replaced by a newer request"
-            EventType.ERROR -> "Failed"
-            EventType.OPERATION_INTERRUPTED -> "Interrupted, app was stopped"
-            EventType.DEVICE_DISAPPEARED -> "Device disconnected"
-            EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE -> "App observed an external codec change: $actual"
-            EventType.READ_FAILED -> "Couldn't read the codec"
-            EventType.PREFERRED_DELETED -> "Preferred codec deleted"
-            EventType.DEVICE_UNLINKED -> "Device unlinked"
-            EventType.PERMISSION_CHANGED -> "Nearby devices permission ${event.message}"
-            EventType.OBSERVING_CHANGED -> "Presence: ${event.message}"
-            EventType.OBSERVING_FAILED -> "Couldn't observe the device's presence"
-            EventType.TEST_LABEL -> "Test: ${event.message}"
-        }
-    }
+@OptIn(ExperimentalSerializationApi::class)
+private val prettyJson = Json(from = EventLog.json) {
+    prettyPrint = true
+    prettyPrintIndent = "  "
+}
 
-    /** The time from the trigger to the resolution, null if it isn't worth showing. */
-    private fun describeDuration(entry: LogEntry): String? {
-        val resolution = entry.resolution ?: return null
-        // Resolved when the app started again, which says nothing about the operation
-        if (resolution.type == EventType.OPERATION_INTERRUPTED)
-            return null
-        val millis = resolution.time - entry.first.time
-        return when {
-            millis < 100 -> null
-            millis < 60_000 -> String.format(Locale.getDefault(), "%.1f s", millis / 1000.0)
-            millis < 3_600_000 -> "${millis / 60_000} min ${millis / 1000 % 60} s"
-            else -> "${millis / 3_600_000} h ${millis / 60_000 % 60} min"
-        }
-    }
+// Created when used, so they follow a change of the locale
+private val timeFormatter get() = DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
+private val dateFormatter get() = DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
 
-    private fun describeOperation(entry: LogEntry): String {
-        val trigger = describe(entry.first)
-        val resolution = entry.resolution ?: return "$trigger → in progress"
-        return "$trigger → ${describe(resolution)}" + (describeDuration(entry)?.let { " ($it)" } ?: "")
-    }
+/** What the log screen's controls do, implemented by [LogActivity]. */
+internal interface LogScreenActions {
+    fun back()
+    fun share(mode: LogExport.Mode)
+    fun clear()
+}
 
-    private fun zoned(time: Long) = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault())
+/** The events of an operation in order, or a single standalone event. */
+private class LogEntry(val events: List<LogEvent>) {
+    val first get() = events.first()
+    val isOperation get() = first.type.flow == OperationFlow.TRIGGER
+    val resolution get() = events.lastOrNull { it.type.flow == OperationFlow.RESOLUTION }
+}
 
-    private fun describeDay(day: LocalDate): String {
-        val today = LocalDate.now()
-        return when (day) {
-            today -> "Today"
-            today.minusDays(1) -> "Yesterday"
-            else -> dateFormatter.format(day)
-        }
-    }
-
-    @Composable
-    private fun eventColor(type: EventType): Color {
-        return if (type in FAILURES) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    }
-
-    @OptIn(ExperimentalFoundationApi::class)
-    @Composable
-    private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String? = null, onClick: (() -> Unit)? = null) {
-        // Unlike remember, survives the row being scrolled out of view
-        var showJson by rememberSaveable { mutableStateOf(false) }
-        val haptics = LocalHapticFeedback.current
-        // The row takes the taps inside it, so it passes them on to its entry, unless they close the JSON
-        val tap = if (showJson) ({ showJson = false }) else onClick
-        // Event rows don't ripple, the change they make shows itself
-        val gestures = if (tap != null) {
-            Modifier.combinedClickable(
-                interactionSource = null,
-                indication = null,
-                onClickLabel = if (showJson) "Hide JSON" else onClickLabel,
-                onLongClickLabel = if (showJson) "Hide JSON" else "Show JSON",
-                onLongClick = { showJson = !showJson },
-                onClick = tap
-            )
+private fun buildEntries(events: List<LogEvent>): List<LogEntry> {
+    val operations = HashMap<String, MutableList<LogEvent>>()
+    val entries = ArrayList<MutableList<LogEvent>>()
+    for (event in events) {
+        val uid = event.opUID
+        val operation = uid?.let { operations[it] }
+        if (operation != null) {
+            operation.add(event)
         } else {
-            // Only the long press does something, handling just that means accessibility services offer
-            // no tap
-            Modifier
-                .pointerInput(Unit) {
-                    detectTapGestures(onLongPress = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        showJson = true
-                    })
-                }
-                .semantics(mergeDescendants = true) {
-                    onLongClick("Show JSON") {
-                        showJson = true
-                        true
-                    }
-                }
-        }
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .then(gestures)
-                .padding(horizontal = 16.dp, vertical = 2.dp)
-        ) {
-            // The time is smaller than the text, aligning their baselines keeps it on the first line
-            Row {
-                Text(
-                    timeFormatter.format(zoned(event.time)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(80.dp).alignByBaseline()
-                )
-                Text(
-                    describe(event) + suffix,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = eventColor(event.type),
-                    modifier = Modifier.alignByBaseline()
-                )
-            }
-            val message = event.message
-            if (message != null && event.type !in MESSAGE_DESCRIBED) {
-                Text(
-                    message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 80.dp)
-                )
-            }
-            if (showJson) {
-                // Scrolls instead of wrapping, wrapped JSON is hard to read
-                Text(
-                    prettyJson.encodeToString(event),
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    softWrap = false,
-                    modifier = Modifier
-                        .padding(start = 80.dp, top = 4.dp)
-                        .horizontalScroll(rememberScrollState())
-                )
-            }
+            val entry = mutableListOf(event)
+            if (uid != null)
+                operations[uid] = entry
+            entries.add(entry)
         }
     }
+    return entries.map { LogEntry(it) }
+}
 
-    @Composable
-    private fun EntryItem(entry: LogEntry) {
-        // Unlike remember, survives the entry being scrolled out of view and the screen being rotated
-        var expanded by rememberSaveable { mutableStateOf(false) }
-        // A tap anywhere on an operation toggles it, its event rows pass their taps on
-        val toggleLabel = if (expanded) "Hide events" else "Show events"
-        val toggle = if (!entry.isOperation) Modifier else Modifier
-            .clickable(onClickLabel = toggleLabel, role = Role.Button) { expanded = !expanded }
-            .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
-        Column(Modifier.fillMaxWidth().then(toggle).animateContentSize()) {
-            val device = entry.first.device
-            if (device != null)
-                DeviceHeader(device, arrow = entry.isOperation, expanded = expanded)
-            else
-                Spacer(Modifier.height(8.dp))
-            if (!entry.isOperation) {
-                EventRow(entry.first)
-            } else if (!expanded) {
-                OperationSummary(entry)
-            } else {
-                val resolution = entry.resolution
-                val duration = describeDuration(entry)?.let { " ($it)" } ?: ""
-                // Rows created in a loop need a key to tell their saved state apart
-                for (event in entry.events) key(event.seq) {
-                    EventRow(event, if (event === resolution) duration else "", toggleLabel) { expanded = false }
+private fun describe(event: LogEvent): String {
+    val config = event.config?.describe()
+    val actual = event.actual?.describe() ?: "no codec"
+    return when (event.type) {
+        EventType.DEVICE_APPEARED -> "Device connected"
+        EventType.A2DP_CONNECTED -> "Audio connected"
+        EventType.USER_SET_CODEC -> "Codec chosen: $config"
+        EventType.USER_RESTORE_PREFERRED -> "Restoring preferred codec: $config"
+        EventType.USER_SAVE_PREFERRED -> "Saving preferred codec: $config"
+        EventType.USER_LINK_DEVICE -> "Linking device"
+        EventType.SET_CODEC_CONFIG -> "Setting codec" + (event.attempt?.let { ", attempt $it" } ?: "") + ": $config"
+        EventType.VALIDATE_CODEC_CONFIG -> when {
+            event.actual == null -> "Codec change incomplete, no codec reported"
+            event.actual.own?.let { event.config?.own?.isFulfilledBy(it) } != true -> "Codec change incomplete, active: $actual"
+            else -> "Codec validated: $actual"
+        }
+        EventType.ASSOCIATION_REQUESTED -> "Asked to link the device"
+        EventType.CODEC_VERIFIED -> "Codec applied: $actual"
+        EventType.PREFERRED_SAVED -> "Preferred codec saved"
+        EventType.ASSOCIATION_CREATED -> "Device linked"
+        EventType.ASSOCIATION_FAILED -> "Linking device failed"
+        EventType.MAX_ATTEMPTS -> "Codec not applied after ${event.attempt} attempts" +
+                (event.actual?.let { ", still ${it.describe()}" } ?: "")
+        EventType.NOT_CONNECTED -> "Audio not connected yet"
+        EventType.NO_ASSOCIATION -> "Device isn't linked"
+        EventType.NO_PREFERRED_CODEC -> "No preferred codec"
+        EventType.NO_PERMISSION -> "Nearby devices permission missing"
+        EventType.SECURITY_EXCEPTION -> "Bluetooth refused the codec change"
+        EventType.PROFILE_UNAVAILABLE -> "Bluetooth audio unavailable"
+        EventType.PROFILE_DISCONNECTED -> "Bluetooth audio service disconnected"
+        EventType.TIMEOUT -> "Timed out"
+        EventType.CANCELLED -> "Cancelled"
+        EventType.ALREADY_PENDING -> "Already in progress"
+        EventType.SUPERSEDED -> "Replaced by a newer request"
+        EventType.ERROR -> "Failed"
+        EventType.OPERATION_INTERRUPTED -> "Interrupted, app was stopped"
+        EventType.DEVICE_DISAPPEARED -> "Device disconnected"
+        EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE -> "App observed an external codec change: $actual"
+        EventType.READ_FAILED -> "Couldn't read the codec"
+        EventType.PREFERRED_DELETED -> "Preferred codec deleted"
+        EventType.DEVICE_UNLINKED -> "Device unlinked"
+        EventType.PERMISSION_CHANGED -> "Nearby devices permission ${event.message}"
+        EventType.OBSERVING_CHANGED -> "Presence: ${event.message}"
+        EventType.OBSERVING_FAILED -> "Couldn't observe the device's presence"
+        EventType.TEST_LABEL -> "Test: ${event.message}"
+    }
+}
+
+/** The time from the trigger to the resolution, null if it isn't worth showing. */
+private fun describeDuration(entry: LogEntry): String? {
+    val resolution = entry.resolution ?: return null
+    // Resolved when the app started again, which says nothing about the operation
+    if (resolution.type == EventType.OPERATION_INTERRUPTED)
+        return null
+    val millis = resolution.time - entry.first.time
+    return when {
+        millis < 100 -> null
+        millis < 60_000 -> String.format(Locale.getDefault(), "%.1f s", millis / 1000.0)
+        millis < 3_600_000 -> "${millis / 60_000} min ${millis / 1000 % 60} s"
+        else -> "${millis / 3_600_000} h ${millis / 60_000 % 60} min"
+    }
+}
+
+private fun describeOperation(entry: LogEntry): String {
+    val trigger = describe(entry.first)
+    val resolution = entry.resolution ?: return "$trigger → in progress"
+    return "$trigger → ${describe(resolution)}" + (describeDuration(entry)?.let { " ($it)" } ?: "")
+}
+
+private fun zoned(time: Long) = Instant.ofEpochMilli(time).atZone(ZoneId.systemDefault())
+
+private fun describeDay(day: LocalDate, today: LocalDate): String {
+    return when (day) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> dateFormatter.format(day)
+    }
+}
+
+@Composable
+private fun eventColor(type: EventType): Color {
+    return if (type in FAILURES) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String? = null, onClick: (() -> Unit)? = null) {
+    // Unlike remember, survives the row being scrolled out of view
+    var showJson by rememberSaveable { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    // The row takes the taps inside it, so it passes them on to its entry, unless they close the JSON
+    val tap = if (showJson) ({ showJson = false }) else onClick
+    // Event rows don't ripple, the change they make shows itself
+    val gestures = if (tap != null) {
+        Modifier.combinedClickable(
+            interactionSource = null,
+            indication = null,
+            onClickLabel = if (showJson) "Hide JSON" else onClickLabel,
+            onLongClickLabel = if (showJson) "Hide JSON" else "Show JSON",
+            onLongClick = { showJson = !showJson },
+            onClick = tap
+        )
+    } else {
+        // Only the long press does something, handling just that means accessibility services offer
+        // no tap
+        Modifier
+            .pointerInput(Unit) {
+                detectTapGestures(onLongPress = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showJson = true
+                })
+            }
+            .semantics(mergeDescendants = true) {
+                onLongClick("Show JSON") {
+                    showJson = true
+                    true
                 }
             }
-            Spacer(Modifier.height(8.dp))
-        }
     }
-
-    @Composable
-    private fun DeviceHeader(device: LogDevice, arrow: Boolean, expanded: Boolean) {
-        val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "arrow rotation")
-        // The top padding is part of the header, so it's easier to tap
-        Row(
-            Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Doesn't fill the row, so the arrow stays next to the name, but a long name wraps before it
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .then(gestures)
+            .padding(horizontal = 16.dp, vertical = 2.dp)
+    ) {
+        // The time is smaller than the text, aligning their baselines keeps it on the first line
+        Row {
             Text(
-                device.name ?: device.address,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f, fill = false)
+                timeFormatter.format(zoned(event.time)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(80.dp).alignByBaseline()
             )
-            if (arrow) {
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp).size(20.dp).rotate(rotation)
-                )
-            }
+            Text(
+                describe(event) + suffix,
+                style = MaterialTheme.typography.bodyMedium,
+                color = eventColor(event.type),
+                modifier = Modifier.alignByBaseline()
+            )
+        }
+        val message = event.message
+        if (message != null && event.type !in MESSAGE_DESCRIBED) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 80.dp)
+            )
+        }
+        if (showJson) {
+            // Scrolls instead of wrapping, wrapped JSON is hard to read
+            Text(
+                prettyJson.encodeToString(event),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                softWrap = false,
+                modifier = Modifier
+                    .padding(start = 80.dp, top = 4.dp)
+                    .horizontalScroll(rememberScrollState())
+            )
         }
     }
+}
 
-    @Composable
-    private fun OperationSummary(entry: LogEntry) {
-        val resolution = entry.resolution
-        // Padded like EventRow, so the summary and the trigger's row line up when expanding
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
-            Row {
-                Text(
-                    timeFormatter.format(zoned(entry.first.time)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.width(80.dp).alignByBaseline()
-                )
-                Text(
-                    describeOperation(entry),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.alignByBaseline()
-                )
-            }
-            // "Failed" alone doesn't say what went wrong
-            val message = resolution?.message
-            if (resolution?.type == EventType.ERROR && message != null) {
-                Text(
-                    message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 80.dp)
-                )
+@Composable
+private fun EntryItem(entry: LogEntry) {
+    // Unlike remember, survives the entry being scrolled out of view and the screen being rotated
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    // A tap anywhere on an operation toggles it, its event rows pass their taps on
+    val toggleLabel = if (expanded) "Hide events" else "Show events"
+    val toggle = if (!entry.isOperation) Modifier else Modifier
+        .clickable(onClickLabel = toggleLabel, role = Role.Button) { expanded = !expanded }
+        .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+    Column(Modifier.fillMaxWidth().then(toggle).animateContentSize()) {
+        val device = entry.first.device
+        if (device != null)
+            DeviceHeader(device, arrow = entry.isOperation, expanded = expanded)
+        else
+            Spacer(Modifier.height(8.dp))
+        if (!entry.isOperation) {
+            EventRow(entry.first)
+        } else if (!expanded) {
+            OperationSummary(entry)
+        } else {
+            val resolution = entry.resolution
+            val duration = describeDuration(entry)?.let { " ($it)" } ?: ""
+            // Rows created in a loop need a key to tell their saved state apart
+            for (event in entry.events) key(event.seq) {
+                EventRow(event, if (event === resolution) duration else "", toggleLabel) { expanded = false }
             }
         }
+        Spacer(Modifier.height(8.dp))
     }
+}
 
-    @Composable
-    private fun ExportOption(selected: Boolean, title: String, description: String, onSelect: () -> Unit) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .selectable(selected = selected, onClick = onSelect, role = Role.RadioButton)
-                .padding(vertical = 8.dp),
-            verticalAlignment = Alignment.Top
+@Composable
+private fun DeviceHeader(device: LogDevice, arrow: Boolean, expanded: Boolean) {
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "arrow rotation")
+    // The top padding is part of the header, so it's easier to tap
+    Row(
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Doesn't fill the row, so the arrow stays next to the name, but a long name wraps before it
+        Text(
+            device.name ?: device.address,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        if (arrow) {
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 4.dp).size(20.dp).rotate(rotation)
+            )
+        }
+    }
+}
+
+@Composable
+private fun OperationSummary(entry: LogEntry) {
+    val resolution = entry.resolution
+    // Padded like EventRow, so the summary and the trigger's row line up when expanding
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
+        Row {
+            Text(
+                timeFormatter.format(zoned(entry.first.time)),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(80.dp).alignByBaseline()
+            )
+            Text(
+                describeOperation(entry),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.alignByBaseline()
+            )
+        }
+        // "Failed" alone doesn't say what went wrong
+        val message = resolution?.message
+        if (resolution?.type == EventType.ERROR && message != null) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 80.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportOption(selected: Boolean, title: String, description: String, onSelect: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, onClick = onSelect, role = Role.RadioButton)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ExportDialog(onDismiss: () -> Unit, onShare: (LogExport.Mode) -> Unit) {
+    var mode by remember { mutableStateOf(LogExport.Mode.ANONYMISED) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share log") },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                ExportOption(
+                    selected = mode == LogExport.Mode.ANONYMISED,
+                    title = "Anonymised (recommended)",
+                    description = "Bluetooth addresses are replaced by random ids and device names are removed. Use this when posting the log for diagnosis.",
+                    onSelect = { mode = LogExport.Mode.ANONYMISED }
+                )
+                ExportOption(
+                    selected = mode == LogExport.Mode.FULL,
+                    title = "Full",
+                    description = "Includes the Bluetooth addresses and names of your devices.",
+                    onSelect = { mode = LogExport.Mode.FULL }
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onShare(mode)
+            }) { Text("Share") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun ClearDialog(onDismiss: () -> Unit, onClear: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clear log?") },
+        text = { Text("All logged events are deleted.") },
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onClear()
+            }) { Text("Clear") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/** The log screen, [events] newest first. [today] decides which day is shown as today. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScreenActions) {
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Log") },
+                navigationIcon = {
+                    IconButton(onClick = actions::back) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showExportDialog = true }, enabled = events.isNotEmpty()) {
+                        Icon(Icons.Default.Share, contentDescription = "Share log")
+                    }
+                    IconButton(onClick = { showClearDialog = true }, enabled = events.isNotEmpty()) {
+                        Icon(Icons.Default.Delete, contentDescription = "Clear log")
+                    }
+                }
+            )
+        },
+        // Also keeps the content clear of display cutouts in landscape
+        contentWindowInsets = WindowInsets.safeDrawing
+    ) { innerPadding ->
+        val layoutDirection = LocalLayoutDirection.current
+        // The bottom padding is inside the list, so the entries scroll behind the navigation bar
+        Column(
+            Modifier.fillMaxSize().padding(
+                start = innerPadding.calculateStartPadding(layoutDirection),
+                top = innerPadding.calculateTopPadding(),
+                end = innerPadding.calculateEndPadding(layoutDirection)
+            )
         ) {
-            RadioButton(selected = selected, onClick = null)
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(title, style = MaterialTheme.typography.bodyLarge)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-
-    @Composable
-    private fun ExportDialog() {
-        var mode by remember { mutableStateOf(LogExport.Mode.ANONYMISED) }
-        AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("Share log") },
-            text = {
-                Column(Modifier.selectableGroup()) {
-                    ExportOption(
-                        selected = mode == LogExport.Mode.ANONYMISED,
-                        title = "Anonymised (recommended)",
-                        description = "Bluetooth addresses are replaced by random ids and device names are removed. Use this when posting the log for diagnosis.",
-                        onSelect = { mode = LogExport.Mode.ANONYMISED }
-                    )
-                    ExportOption(
-                        selected = mode == LogExport.Mode.FULL,
-                        title = "Full",
-                        description = "Includes the Bluetooth addresses and names of your devices.",
-                        onSelect = { mode = LogExport.Mode.FULL }
-                    )
+            val entries = remember(events) { buildEntries(events).reversed() }
+            if (entries.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Text("No events logged yet", style = MaterialTheme.typography.bodyLarge)
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showExportDialog = false
-                    shareLog(mode)
-                }) { Text("Share") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showExportDialog = false }) { Text("Cancel") }
+                return@Column
             }
-        )
-    }
-
-    @Composable
-    private fun ClearDialog() {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear log?") },
-            text = { Text("All logged events are deleted.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showClearDialog = false
-                    log.clear()
-                }) { Text("Clear") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun LogScreen() {
-        val events by log.events.collectAsState()
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Log") },
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { showExportDialog = true }, enabled = events.isNotEmpty()) {
-                            Icon(Icons.Default.Share, contentDescription = "Share log")
-                        }
-                        IconButton(onClick = { showClearDialog = true }, enabled = events.isNotEmpty()) {
-                            Icon(Icons.Default.Delete, contentDescription = "Clear log")
-                        }
-                    }
-                )
-            },
-            // Also keeps the content clear of display cutouts in landscape
-            contentWindowInsets = WindowInsets.safeDrawing
-        ) { innerPadding ->
-            val layoutDirection = LocalLayoutDirection.current
-            // The bottom padding is inside the list, so the entries scroll behind the navigation bar
-            Column(
-                Modifier.fillMaxSize().padding(
-                    start = innerPadding.calculateStartPadding(layoutDirection),
-                    top = innerPadding.calculateTopPadding(),
-                    end = innerPadding.calculateEndPadding(layoutDirection)
-                )
+            LazyColumn(
+                contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
+                verticalArrangement = Arrangement.Top
             ) {
-                val entries = remember(events) { buildEntries(events).reversed() }
-                if (entries.isEmpty()) {
-                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Text("No events logged yet", style = MaterialTheme.typography.bodyLarge)
-                    }
-                    return@Column
-                }
-                LazyColumn(
-                    contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
-                    verticalArrangement = Arrangement.Top
-                ) {
-                    var day: LocalDate? = null
-                    for (entry in entries) {
-                        val entryDay = zoned(entry.first.time).toLocalDate()
-                        if (entryDay != day) {
-                            day = entryDay
-                            item(key = "day $entryDay") {
-                                Text(
-                                    describeDay(entryDay),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
-                                )
-                            }
-                        } else {
-                            item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
+                var day: LocalDate? = null
+                for (entry in entries) {
+                    val entryDay = zoned(entry.first.time).toLocalDate()
+                    if (entryDay != day) {
+                        day = entryDay
+                        item(key = "day $entryDay") {
+                            Text(
+                                describeDay(entryDay, today),
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+                            )
                         }
-                        item(key = entry.first.seq) { EntryItem(entry) }
+                    } else {
+                        item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
                     }
+                    item(key = entry.first.seq) { EntryItem(entry) }
                 }
             }
         }
-        if (showExportDialog)
-            ExportDialog()
-        if (showClearDialog)
-            ClearDialog()
     }
+    if (showExportDialog)
+        ExportDialog(onDismiss = { showExportDialog = false }, onShare = actions::share)
+    if (showClearDialog)
+        ClearDialog(onDismiss = { showClearDialog = false }, onClear = actions::clear)
 }
