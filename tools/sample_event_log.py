@@ -138,7 +138,7 @@ def build(now_ms, utc_offset_minutes):
                 ("MAX_ATTEMPTS", 1, {"config": LDAC_96, "actual": LDAC_48, "attempt": 5}), message="legacy receiver")
     b.at(2, 18, 40)
     b.operation("A2DP_CONNECTED", DAC, [(set_, 40, {"config": APTX_HD, "attempt": 1})],
-                ("TIMEOUT", 15_000, {"attempt": 1, "message": "applier closed"}), message="legacy receiver")
+                ("TIMEOUT", 15_000, {"attempt": 1}), message="legacy receiver")
 
     b.at(1, 7, 50)
     b.event("OBSERVING_CHANGED", device=HEADPHONES, message="observing presence")
@@ -176,8 +176,15 @@ def build(now_ms, utc_offset_minutes):
 
     b.at(0, 0, 5)
     b.event("TEST_LABEL", message="reconnect_test start")
-    b.operation("USER_SET_CODEC", HEADPHONES, [(set_, 5, {"config": AAC})], ("CODEC_SET_SENT", 20, {}), config=AAC)
-    b.event("ACTIVITY_OBSERVED_CODEC_CHANGE", device=HEADPHONES, delay_ms=1000, actual=AAC)
+    # The codec chosen while restoring supersedes the restore, so the two operations interleave
+    restore, chosen = str(uuid.uuid4()), str(uuid.uuid4())
+    b.event("USER_RESTORE_PREFERRED", restore, HEADPHONES, config=LDAC_96)
+    b.event(set_, restore, HEADPHONES, 5, config=LDAC_96, attempt=1)
+    b.event("USER_SET_CODEC", chosen, HEADPHONES, 300, config=AAC)
+    b.event("SUPERSEDED", restore, HEADPHONES, 1, attempt=1, message=f"superseded by operation {chosen}")
+    b.event(set_, chosen, HEADPHONES, 1, config=AAC, attempt=1)
+    b.event(get, chosen, HEADPHONES, 500, config=AAC, actual=AAC, attempt=1)
+    b.event("CODEC_VERIFIED", chosen, HEADPHONES, 1, actual=AAC, attempt=1)
     b.operation("USER_SET_CODEC", DAC, [("ASSOCIATION_REQUESTED", 5, {})],
                 ("ASSOCIATION_FAILED", 8000, {"message": "association request already in progress"}), config=APTX_HD)
     b.operation("USER_SET_CODEC", HEADPHONES, [(set_, 5, {"config": OPUS})], ("ERROR", 20, {
@@ -195,7 +202,7 @@ def build(now_ms, utc_offset_minutes):
     b.event("DEVICE_UNLINKED", device=LC3_EARBUDS, delay_ms=10_000)
     b.event("READ_FAILED", device=LC3_EARBUDS, delay_ms=1000,
             message="java.lang.SecurityException: Need BLUETOOTH_PRIVILEGED permission")
-    b.event("ACTIVITY_OBSERVED_CODEC_CHANGE", device=LC3_EARBUDS, delay_ms=5000, actual=LC3)
+    b.event("ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE", device=LC3_EARBUDS, delay_ms=5000, actual=LC3)
     b.event("PERMISSION_CHANGED", delay_ms=60_000, message="permanently denied")
     # Left open on purpose, loading the log resolves it with OPERATION_INTERRUPTED
     b.operation("A2DP_CONNECTED", HEADPHONES, [(set_, 40, {"config": LDAC_96, "attempt": 1})],

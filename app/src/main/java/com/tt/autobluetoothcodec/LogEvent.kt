@@ -17,6 +17,8 @@ enum class EventType(val flow: OperationFlow) {
     A2DP_CONNECTED(OperationFlow.TRIGGER),
     // The user chose a codec in the UI
     USER_SET_CODEC(OperationFlow.TRIGGER),
+    // The user restored the preferred codec, config is the preferred codec when it was chosen
+    USER_RESTORE_PREFERRED(OperationFlow.TRIGGER),
     USER_SAVE_PREFERRED(OperationFlow.TRIGGER),
     USER_LINK_DEVICE(OperationFlow.TRIGGER),
 
@@ -28,7 +30,6 @@ enum class EventType(val flow: OperationFlow) {
     ASSOCIATION_REQUESTED(OperationFlow.ELEMENT),
 
     CODEC_VERIFIED(OperationFlow.RESOLUTION),
-    CODEC_SET_SENT(OperationFlow.RESOLUTION),
     PREFERRED_SAVED(OperationFlow.RESOLUTION),
     ASSOCIATION_CREATED(OperationFlow.RESOLUTION),
     ASSOCIATION_FAILED(OperationFlow.RESOLUTION),
@@ -42,17 +43,20 @@ enum class EventType(val flow: OperationFlow) {
     PROFILE_DISCONNECTED(OperationFlow.RESOLUTION),
     TIMEOUT(OperationFlow.RESOLUTION),
     CANCELLED(OperationFlow.RESOLUTION),
-    // The device is already pending in another operation, the message names it
+    // The same codec is already pending for the device in another operation, the message names it
     ALREADY_PENDING(OperationFlow.RESOLUTION),
+    // Another operation requested a different codec for the device, the message names it
+    SUPERSEDED(OperationFlow.RESOLUTION),
     ERROR(OperationFlow.RESOLUTION),
     // Added by EventLog for operations a previous process didn't resolve. That process ended,
     // but why isn't known: it may have crashed, been force-stopped or been killed by the system
     OPERATION_INTERRUPTED(OperationFlow.RESOLUTION),
 
     DEVICE_DISAPPEARED(OperationFlow.STANDALONE),
-    // MainActivity read a codec that differs from the last one known for the device. When the
-    // codec changed isn't known, only that it changed since the last known one was logged
-    ACTIVITY_OBSERVED_CODEC_CHANGE(OperationFlow.STANDALONE),
+    // MainActivity read a codec that differs from the last one known for the device, while the app
+    // wasn't changing it. When the codec changed isn't known, only that it changed since the last
+    // known one was logged
+    ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE(OperationFlow.STANDALONE),
     READ_FAILED(OperationFlow.STANDALONE),
     PREFERRED_DELETED(OperationFlow.STANDALONE),
     DEVICE_UNLINKED(OperationFlow.STANDALONE),

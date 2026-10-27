@@ -43,34 +43,34 @@ class A2dpConnectReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Keeps the broadcast pending until the codec is applied and the log is written. Later
-     * background broadcasts wait for it, so it gives up after [DEADLINE_MILLIS].
+     * Keeps the broadcast pending until the operation is resolved and the log is written. Later
+     * background broadcasts wait for it, so it gives up after [DEADLINE_MILLIS]. If another request
+     * supersedes it, the applier continues that one without the broadcast.
      */
     private class AsyncApply(context: Context, private val log: EventLog, private val result: BroadcastReceiver.PendingResult) {
         private val handler = Handler(Looper.getMainLooper())
-        private val applier = CodecApplier(context) { finish(EventType.CANCELLED) }
-        private val deadline = Runnable { finish(EventType.TIMEOUT) }
+        private val applier = CodecApplier.get(context)
+        private var deadline: Runnable? = null
         private var finished = false
 
         fun start(device: BluetoothDevice, operation: EventLog.Operation) {
-            handler.postDelayed(deadline, DEADLINE_MILLIS)
+            // Resolving the operation finishes the broadcast
+            deadline = Runnable { applier.cancel(operation, EventType.TIMEOUT) }.also { handler.postDelayed(it, DEADLINE_MILLIS) }
             try {
-                applier.apply(device, operation)
+                applier.apply(device, operation, onDone = { finish() })
             } catch (e: Throwable) {
                 Log.e(TAG, "applying the codec failed", e)
-                if (operation.isOpen)
+                if (!applier.cancel(operation, EventType.ERROR, e.toString()) && operation.isOpen)
                     operation.resolve(EventType.ERROR, message = e.toString())
-                finish(EventType.CANCELLED)
+                finish()
             }
         }
 
-        /** [resolution] resolves the operation if it's still pending. */
-        private fun finish(resolution: EventType) {
+        private fun finish() {
             if (finished)
                 return
             finished = true
-            handler.removeCallbacks(deadline)
-            applier.close(resolution)
+            deadline?.let { handler.removeCallbacks(it) }
             // The process may be killed once the broadcast is finished
             log.flush { result.finish() }
         }

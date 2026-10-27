@@ -9,6 +9,7 @@ import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
+import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
 import android.content.pm.ApplicationInfo
@@ -78,6 +79,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import java.util.TreeMap
 
 class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
@@ -91,6 +96,15 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         // Kept per process, so the activity being recreated doesn't log the same state again
         private var loggedPermissionState: PermissionState? = null
         private val readFailures = HashSet<String>()
+
+        private fun showFailure(context: Context, resolution: EventType) {
+            val text = when (resolution) {
+                EventType.SECURITY_EXCEPTION -> "Bluetooth didn't allow changing the codec"
+                EventType.ERROR -> "Changing the codec failed"
+                else -> return
+            }
+            Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private enum class PermissionState { GRANTED, DENIED, PERMANENTLY_DENIED }
@@ -101,6 +115,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     }
 
     private val log by lazy { EventLog.get(this) }
+    private val applier by lazy { CodecApplier.get(this) }
 
     private var permissionState by mutableStateOf(PermissionState.DENIED)
 
@@ -142,6 +157,13 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
 
         setContent { Foo() }
+
+        lifecycleScope.launch {
+            // Shows the codec as soon as an apply starts or ends, instead of on the next poll
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                applier.pending.collect { pullBluetoothState() }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -305,38 +327,34 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         applyCodecConfig(device, config, operation)
     }
 
-    private fun applyCodecConfig(device: BluetoothDevice, config: CodecConfig, operation: EventLog.Operation, mayAssociate: Boolean = true) {
-        val profile = a2dpProfile
-        if (profile == null) {
-            operation.resolve(EventType.PROFILE_UNAVAILABLE)
-            return
-        }
+    private fun restorePreferredConfig(device: BluetoothDevice, config: CodecConfig) {
+        val operation = log.begin(EventType.USER_RESTORE_PREFERRED, LogDevice.of(device), LogCodecConfig.of(config))
+        applyCodecConfig(device, null, operation)
+    }
+
+    /** Applies [config], or the preferred codec if it's null, as part of [operation]. */
+    private fun applyCodecConfig(device: BluetoothDevice, config: CodecConfig?, operation: EventLog.Operation, mayAssociate: Boolean = true) {
         if (mayAssociate && PermissionUtil.isAssociationRequired(this, device)) {
             associateFor(device, operation) { applyCodecConfig(device, config, operation, mayAssociate = false) }
             return
         }
-        try {
-            operation.log(EventType.SET_CODEC_CONFIG, config = LogCodecConfig.of(config))
-            A2dpProfileUtil.setCodecConfig(profile, device, config.toAndroid())
-        } catch (e: SecurityException) {
-            // An updated Bluetooth module may require an association on older versions as well
-            if (mayAssociate && PermissionUtil.canAssociate(this) && !PermissionUtil.hasAssociation(this, device)) {
-                associateFor(device, operation) { applyCodecConfig(device, config, operation, mayAssociate = false) }
-            } else {
-                Log.w(TAG, "Bluetooth refused to change the codec", e)
-                Toast.makeText(this, "Bluetooth didn't allow changing the codec", Toast.LENGTH_SHORT).show()
-                operation.resolve(EventType.SECURITY_EXCEPTION, message = e.toString())
-            }
-            return
-        } catch (e: Exception) {
-            Log.e(TAG, "changing the codec failed", e)
-            Toast.makeText(this, "Changing the codec failed", Toast.LENGTH_SHORT).show()
-            operation.resolve(EventType.ERROR, message = e.toString())
+        // The applier may outlive this activity, so the result is shown with the application context
+        val appContext = applicationContext
+        val onSecurityException: ((EventLog.Operation, SecurityException) -> Unit)? =
+            if (mayAssociate) ({ handedBack, e -> associateAfterRefusal(device, config, handedBack, e) }) else null
+        applier.apply(device, operation, config, onDone = { showFailure(appContext, it) }, onSecurityException = onSecurityException)
+    }
+
+    /** Continues [operation] after Bluetooth refused the codec change with [e]. */
+    private fun associateAfterRefusal(device: BluetoothDevice, config: CodecConfig?, operation: EventLog.Operation, e: SecurityException) {
+        // An updated Bluetooth module may require an association on older versions as well
+        if (!isDestroyed && PermissionUtil.canAssociate(this) && !PermissionUtil.hasAssociation(this, device)) {
+            associateFor(device, operation) { applyCodecConfig(device, config, operation, mayAssociate = false) }
             return
         }
-        // Not verified here, the next poll logs the codec if it changed
-        operation.resolve(EventType.CODEC_SET_SENT)
-        pullBluetoothState()
+        Log.w(TAG, "Bluetooth refused to change the codec", e)
+        operation.resolve(EventType.SECURITY_EXCEPTION, message = e.toString())
+        showFailure(applicationContext, EventType.SECURITY_EXCEPTION)
     }
 
     private fun savePreferredConfig(device: BluetoothDevice, config: CodecConfig) {
@@ -412,7 +430,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             logObservedCodec(data)
     }
 
-    /** Logs codecs that differ from the last one known for the device, and new read errors. */
+    /**
+     * Logs codecs that differ from the last one known for the device, and new read errors. While
+     * the applier changes the codec of a device, its operation logs the codecs instead.
+     */
     private fun logObservedCodec(data: DeviceData) {
         val address = data.device.address.uppercase()
         val error = data.readError
@@ -423,8 +444,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
         readFailures.remove(address)
         val config = data.androidCodecConfig ?: return
-        if (config != log.lastKnownCodec(address))
-            log.log(EventType.ACTIVITY_OBSERVED_CODEC_CHANGE, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
+        if (address !in applier.pending.value && config != log.lastKnownCodec(address))
+            log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
     }
 
     private fun readDeviceData(profile: BluetoothA2dp, device: BluetoothDevice): DeviceData {
@@ -885,7 +906,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                         text = { Text("Restore Preferred Codec") },
                         onClick = {
                             expanded = false
-                            setCodecConfig(device.device, preferredConfig)
+                            restorePreferredConfig(device.device, preferredConfig)
                         }
                     )
                 }

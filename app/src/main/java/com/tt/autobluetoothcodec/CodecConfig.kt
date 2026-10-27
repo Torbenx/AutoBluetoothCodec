@@ -177,6 +177,22 @@ sealed class CodecConfig : Cloneable {
         return toAndroid().hashCode()
     }
 
+    /**
+     * Whether [actual] is this configuration when used as the target of a codec change. Codec
+     * specific options left at the system default accept any value, the Bluetooth stack reports
+     * the value it chose for them. toAndroid() maps the system default to 0.
+     */
+    fun isFulfilledBy(actual: CodecConfig): Boolean {
+        val target = toAndroid()
+        val other = actual.toAndroid()
+        return target == other.copy(
+            codecSpecific1 = if (target.codecSpecific1 == 0) 0 else other.codecSpecific1,
+            codecSpecific2 = if (target.codecSpecific2 == 0) 0 else other.codecSpecific2,
+            codecSpecific3 = if (target.codecSpecific3 == 0) 0 else other.codecSpecific3,
+            codecSpecific4 = if (target.codecSpecific4 == 0) 0 else other.codecSpecific4
+        )
+    }
+
     /** For example "LDAC, 96 kHz, 24-bit, adaptive bitrate". */
     fun describe(): String {
         val codec = getCodecName(getCodecType()) ?: "unknown codec"

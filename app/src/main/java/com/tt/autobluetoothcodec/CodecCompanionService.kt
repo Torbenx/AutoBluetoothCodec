@@ -31,8 +31,7 @@ class CodecCompanionService : CompanionDeviceService() {
         private const val TAG = "CodecCompanionService"
     }
 
-    // Created on the first device and kept until the system unbinds the service
-    private var applier: CodecApplier? = null
+    private val applier by lazy { CodecApplier.get(this) }
     private val presentDevices = HashSet<String>()
     private var receiverRegistered = false
 
@@ -80,26 +79,24 @@ class CodecCompanionService : CompanionDeviceService() {
         if (device == null)
             return
         presentDevices.remove(device.address)
-        applier?.cancel(device, "device disappeared")
+        applier.cancel(device, EventType.CANCELLED, "device disappeared")
     }
 
+    // Pending requests are left to the applier, they end within a few seconds
     override fun onDestroy() {
         super.onDestroy()
         if (receiverRegistered) {
             unregisterReceiver(a2dpReceiver)
             receiverRegistered = false
         }
-        applier?.close()
-        applier = null
     }
 
     private fun applyCodec(device: BluetoothDevice, operation: EventLog.Operation) {
-        val applier = this.applier ?: CodecApplier(this) {}.also { this.applier = it }
         try {
             applier.apply(device, operation)
         } catch (e: Throwable) {
             Log.e(TAG, "applying the codec of ${device.address} failed", e)
-            if (operation.isOpen)
+            if (!applier.cancel(operation, EventType.ERROR, e.toString()) && operation.isOpen)
                 operation.resolve(EventType.ERROR, message = e.toString())
         }
     }
