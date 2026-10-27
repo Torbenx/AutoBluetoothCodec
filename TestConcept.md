@@ -768,8 +768,8 @@ needs the ones before it unless it says otherwise.
    restore, and the connect fixture. A smoke class whose empty tests only run check,
    restore and check on every phone, many times in a row. The baseline has to
    be stable before tests build on it.
-8. **L2 on the phones**: `run_suite.py` runs the shared UI tests on every
-   phone.
+8. **L2 on the phones** (done): `run_suite.py --suite ui` runs the shared UI
+   tests on every phone; all 38 pass on all three.
 9. **Snippet module and L3 P1**: the RPCs; B1, B2 (codec types), B3, B8.
 10. **L4 P1**: C1, C2, C3.
 11. **L5 P1**: `snippet-uiautomator`, `screens.py`; E2, E3, E6. With this step the core promise is
