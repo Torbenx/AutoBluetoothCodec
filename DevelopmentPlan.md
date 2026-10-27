@@ -27,6 +27,7 @@
    * Improve LogActivity UI
      * LogActivity share mode selection should come up from the bottom and have its UI improved
    * Design an App icon
+   * Add screenshot tests (light and dark, font scales, landscape, screen sizes) once the UI is polished, see TestConcept.md (V12)
 
 3. Prepare to publish
    * Write README.md, LICENCE.md for Github repo

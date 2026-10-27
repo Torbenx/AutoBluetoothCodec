@@ -1,0 +1,834 @@
+# Test concept
+
+How Auto Bluetooth Codec is tested: which test levels exist, what each one
+covers, which information and control channels they use, what the harness
+needs, and in which order it's built. The decisions behind it, D1 to D15, are
+listed in [section 13](#13-decisions) and referenced where they matter.
+
+The two manual test records, [codec-applier-tests.md](tools/codec-applier-tests.md)
+and [log-ui-tests.md](tools/log-ui-tests.md), inform the automated tests and
+are deleted once their cases are automated (D10), see
+[section 11](#11-existing-manual-tests).
+
+## 1. What needs testing
+
+The app's promise is one sentence: when a device connects, its preferred codec
+is applied, even if the app isn't running. Most of the risk sits in the parts
+between the app and the system, which unit tests can't see.
+
+| Part | What can go wrong | Tested best by |
+| --- | --- | --- |
+| `CodecConfig` model, serializers | Wrong mapping to the stack's values, wrong verification (`isFulfilledBy`), old stored formats | Unit tests |
+| `CodecApplier` | Retries, supersede and pending rules, profile proxy lifecycle, resolutions, the order in which `pending` is published | Component tests with a fake Bluetooth backend, a few device tests |
+| `A2dpProfileUtil` | Reflection breaks on a version or vendor stack, values read differently | Device contract tests on every phone |
+| `CodecCompanionService`, `A2dpConnectReceiver` | Not started, started too late, killed mid-apply, process restarted without state | Background and cold start tests on the phones |
+| `CompanionPresence`, `PermissionUtil` | Wrong branch for an API level or a phone without the companion feature, observing drifts from the stored state | Component tests across SDK levels, device tests on 31+ |
+| `EventLog`, `LogExport` | Broken operation structure, lost or partial lines, trimming, anonymisation | Unit and component tests |
+| `MainActivity` | Wrong UI for a device state, chip logic, permission and linking flows, logging observed codecs | UI tests with fake state, Bluetooth logic tests with the main screen open, a few journeys |
+| `LogActivity` | Wrong texts, grouping, expand and collapse, export and clear | UI tests with the sample log |
+
+## 2. Testbed
+
+| Phone | Serial | Android | API | Notes |
+| --- | --- | --- | --- | --- |
+| Pixel 3a | `0000000028` | 9 | 28 | Rooted, no lock screen, clock set to 2019 |
+| Pixel 3a | `0000000032` | 12L | **32** | Rooted, no lock screen |
+| Galaxy S24 | `R0000000036` | 16 | 36 | Not rooted, secure lock screen, Samsung Bluetooth stack |
+
+| Headset | Address | Controlled by |
+| --- | --- | --- |
+| Qudelix-5K | `0A:1B:2C:3D:4E:5F` | USB, [qudelix5k.py](tools/qudelix5k.py) |
+| Any other headset | from the testbed config | The phone's Bluetooth adapter, see [6.3](#63-headsets) |
+
+The second Pixel is API 32 (build `SP2A.220505.008`), not 31. The app has no
+branch between 31 and 32, so it covers the API 31 paths.
+
+Assumptions:
+
+- A headset can only connect to the phones on adb (D6). Phones that aren't on
+  adb are out of range or have Bluetooth off; the harness doesn't check.
+- A headset serves one phone at a time, so the phones are tested one after the
+  other. [testbed_session.py](mobly_tests/testbed_session.py) runs during
+  testing: it keeps Bluetooth off on every phone on adb, keeps the screens on
+  while plugged in, and warns when a phone is locked, unplugged or unreachable.
+  Tests turn Bluetooth on for the phone under test and off again.
+- The phones are unlocked during a run, the S24 included (D15).
+
+### Phone capabilities
+
+Tests don't name phones (D7). They name the API levels they apply to and the
+capabilities they need. A phone without one skips the test, with the reason
+in the report. Only what genuinely can't work without root or with a secure
+lock screen is a capability:
+
+| Capability | Known from | Needed by | Testbed |
+| --- | --- | --- | --- |
+| Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
+| No secure lock screen | `testbed.yaml` | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
+| End a process the system keeps bound | `run-as … kill`, or root (to check in the spike) | C4 | to check |
+| LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
+
+### Code paths per API level
+
+| Path | API 28 Pixel | API 32 Pixel | API 33 | API 34–35 | API 36 S24 | 31+ without companion feature |
+| --- | --- | --- | --- | --- | --- | --- |
+| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService`, observed by address | by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
+| Codec classes | reflection | reflection | public | public | public | – |
+| Runtime permission | – | yes | yes | yes | yes | yes |
+| Association needed to change the codec | no | no | no | yes | yes | – |
+| Association needed to read the codec | no | no | no | no | yes | – |
+| Presence comes from | – | BLE scans (seen in Logcat) | ? | ? | appears before A2DP (manual test 2.1) | – |
+
+Gaps no phone covers: API 33, API 34–35 (the only versions where the codec
+can be read but not changed without a link, so the card shows the codec and
+the link prompt together), and API 31+ phones without the companion feature.
+Component tests (K6) and UI tests (V5) cover their logic. Borrowing an API
+34 or 35 phone would close the biggest remaining gap; an emulator can't, it
+has no A2DP sink with real codecs.
+
+## 3. Channels
+
+### 3.1 Information channels
+
+| Channel | Tells | Strengths | Limits | Use as |
+| --- | --- | --- | --- | --- |
+| Event log file, read with `run-as … cat` | What the app did, why, with which codec, how many attempts | Records background work. Reading it doesn't start or touch the app process. Its format is a product feature (export), so it's stable | Lines are written on a background thread, the last one may be partial or missing | **Main oracle for behaviour** |
+| `TestLabelReceiver` broadcast | Marks a test step with a known `seq` | Flushes the log before the broadcast completes, so "label, then read" is consistent | Starts the app process if it isn't running | Step marker and flush barrier, outside of cold start windows |
+| App snippet | Preferred codecs, `pending`, associations and the codec as the app sees them | Exact internal state, no UI involved | Runs in the app's process as instrumentation: elevates its priority and restarts it when loaded and unloaded | Setup and inspection in Bluetooth logic tests |
+| `dumpsys bluetooth_manager` | Adapter state, A2DP connection and active codec per device | Independent of the app's code, so it can check the app's own reads | Format differs per API level, 2 MB on the S24 | **Main oracle for the physical result** |
+| `cmd companiondevice list`, `dumpsys companiondevice` | Associations, on 33+ also observing | Independent of the app | Observing isn't shown on API 32 (root can read the file) | Oracle for linking and observing |
+| UI hierarchy (UiAutomator) | What the user sees | The only proof that the screen shows the state | Polled every second by the app, slow to query, changes with the planned UI polish | Oracle only for what the UI derives or drives |
+| Logcat | Everything, including the stack | Diagnoses failures | Noisy, not a contract | Artifact on failure, never an oracle |
+| Headset status | The Qudelix's Bluetooth mode | | Doesn't say which phone it's connected to; other headsets have none | Precondition check |
+
+### 3.2 Control channels
+
+| Channel | Does | Notes |
+| --- | --- | --- |
+| UI (UiAutomator) | Every user action, including system dialogs (permission, companion link) | Only in UI tests and journeys |
+| App snippet | Apply a codec through `CodecApplier`, set a codec bypassing it (like another app would), set or delete preferred codecs, sync presence, reset the app's state | Not in background or cold start tests |
+| adb, Bluetooth | The phone's adapter on and off (`svc bluetooth`, with su on API 28) | See [device_state.py](mobly_tests/lib/device_state.py). A2DP alone can't be switched from adb without privileged permissions, as far as known (D14) |
+| adb, app lifecycle | Install, update, clear data, kill the process, grant and revoke the permission, launch activities | Revoking a permission kills the process |
+| adb, companion | `cmd companiondevice associate/disassociate` (checked on 28 and 32, to check on 36) | Links a device without the system dialog (D9) |
+| Headset | Depends on the backend, see [6.3](#63-headsets). Qudelix: `bt-off` (device disappears), `no-a2dp` (A2DP down, link and BLE stay), `normal`, `cycle` | `no-a2dp` gives the state "present but A2DP not connected" that cold start tests need |
+| Developer options | Change the codec like a user would | Only by UI; the snippet's direct set is the faster equivalent |
+
+### 3.3 What to assert where
+
+Each fact is checked at the cheapest level that produces it, and through the
+channel that doesn't depend on the code under test:
+
+1. **The codec that is actually active** is read from `dumpsys`, never only
+   from the app, whose read path is code under test. The contract test B1
+   compares both once per phone; when they agree, both are trusted.
+2. **What the app did** is read from the event log: trigger, attempts and
+   resolution of an operation. The log is the only channel that works the
+   same with the app in the foreground, in the background or restarted.
+3. **App state that isn't logged** (preferred codecs, `pending`, what the app
+   thinks is linked) comes from the snippet, but only in tests where the
+   process priority doesn't matter.
+4. **The UI** is asserted only for what it computes or drives. The main
+   screen is a function of `DeviceData`, re-read every second. That function is
+   tested once with fake data (L2). Journeys then only check that the loop is
+   closed: one assertion that the card shows the codec `dumpsys` reports. Full
+   UI checks in every Bluetooth test would add run time and break with the UI
+   polish, without finding anything the L2 tests miss.
+5. **Logcat, screenshots and UI dumps** are collected when a test fails.
+
+Pitfalls the harness has to handle:
+
+- A label broadcast to a dead app starts its process. Cold start tests send no
+  label between killing the app and the stimulus, and read the log with
+  `run-as` instead.
+- `am instrument` force-stops the target before it starts, so loading the
+  snippet or running the UI tests on a phone restarts the app, and unloading
+  the snippet normally ends the process. Instrumented phases and phases without
+  instrumentation are separated by restarts. The spike confirms this, and that
+  it doesn't leave the package stopped.
+- `am force-stop` puts the package in the stopped state, so manifest receivers
+  get nothing until a component of the app is started again. A broadcast to
+  `TestLabelReceiver` without a label does that without writing to the log. A
+  process killed by the system is simulated with `am kill` (only works in the
+  background) or `kill`.
+- The phones' clocks differ (the API 28 Pixel is in 2019). Events are ordered
+  by `seq` and labels, never compared with the host's time.
+- `dumpsys bluetooth_manager` has several per-device tables, like the AVRCP
+  volume table with its own connection column. The A2DP connection and codec
+  come from the A2DP service section only.
+- `DEVICE_APPEARED` resolving `NOT_CONNECTED` is normal: the device appears
+  before A2DP connects. On API 31/32 it appears when its BLE advertisements
+  are seen, even without any connection (C13).
+- Opening the main screen logs the current codec as
+  `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE` when it differs from the last one
+  in the log. With the empty log of the baseline, the first start always logs
+  one. Tests expect it instead of ignoring it.
+- The baseline links the headset, so the companion dialog only appears in tests
+  that unlink it first (E3, E6).
+
+## 4. Test levels
+
+| Level | Name | Runs on | Stimulus | Oracle | Snippet | Size, time |
+| --- | --- | --- | --- | --- | --- | --- |
+| L0 | Unit | JVM | Function calls | Return values | – | ~50 tests, seconds |
+| L1 | Component | JVM, Robolectric | Fake Bluetooth, fake time, SDK levels 28–36 | State, log events | – | ~55 tests, < 1 min |
+| L2 | UI | JVM with Robolectric, and every phone | Fake screen state, clicks | Semantics tree, callbacks | – | ~40 tests, ~1 min on the JVM, a few minutes per phone |
+| L3 | Bluetooth logic | Phones | Snippet, adb, headset | Log, `dumpsys`, snippet | yes | ~15 tests, ~10 min per phone |
+| L4 | Background and cold start | Phones | adb, headset | Log, `dumpsys` | no | ~13 tests, ~15 min per phone |
+| L5 | Journeys | Phones | UI, headset | `dumpsys`, log, UI | no | ~8 tests, ~10 min per phone |
+| – | Harness self-tests | Host, Python | Recorded dumps and logs | Parsed values | – | seconds |
+
+L0 to L2 need no phone and run on every build, later also in CI. L2 also runs
+on each phone (D2, [section 7](#7-ui-tests-on-the-jvm-and-the-phones)). L3 to
+L5 run on the testbed, one phone at a time, each test starting from the
+baseline ([6.2](#62-baseline-state)).
+
+In the device catalogs, "Runs on" gives API levels, not phones. A test runs on
+every phone that matches and asserts the behaviour of that phone's API level.
+"Needs" lists phone capabilities ([section 2](#phone-capabilities)) and headset
+capabilities ([6.3](#63-headsets)); without them the test is skipped.
+
+Priorities: **P1** first, they cover the core promise and the bugs already
+found; **P2** next; **P3** when there's time.
+
+### L0 Unit tests
+
+Pure JVM. Three test files exist; `ExampleUnitTest` and
+`ExampleInstrumentedTest` go.
+
+| ID | Test | Prio |
+| --- | --- | --- |
+| U1 | `toAndroid`/`fromAndroid` for every codec and option, including values the stack reports but the app never writes (LDAC `codecSpecific1` above 13, AAC below 128, Opus `% 10`) | P1 |
+| U2 | `isFulfilledBy`: options at the system default accept any reported value, explicit options must match, a different codec, rate or size never fulfils. Regression test for manual 1.1 | P1 |
+| U3 | `equals`/`hashCode` through `toAndroid`, clones are independent (the chips modify clones) | P2 |
+| U4 | `describe()`: LDAC fixed bitrates per sample rate family, unknown rate and size, AAC and Opus options | P2 |
+| U5 | Serializers: unknown Hz and bits read as NONE, constant names, numeric fallback, unknown names throw | P2 |
+| U6 | `EventLog` functions: `trim` at the boundary, interleaved operations, `lastKnownCodec` | P2 |
+| U7 | `LogExport`: names containing other names, lower case addresses in messages | P3 |
+
+Codec selection and the log texts stay in the activity files (D1), so they're
+tested through the UI, in V6, V8 and V9.
+
+### L1 Component tests
+
+JVM with Robolectric, for `Handler`, `SharedPreferences`, files, services and
+`@Config(sdk = …)`. Bluetooth is replaced by a fake behind a small interface
+(D1). Robolectric's `ShadowPackageManager` can remove the companion feature,
+which no real phone can. These tests stay on the JVM: they depend on SDK
+levels and fakes that a phone can't provide.
+
+| ID | Test | Prio |
+| --- | --- | --- |
+| K1 | `CodecApplier` resolutions: `CODEC_VERIFIED` on attempt 1 and N, `MAX_ATTEMPTS` after 5, `NOT_CONNECTED`, `NO_ASSOCIATION` (34, 36), `NO_PERMISSION` (31+), `NO_PREFERRED_CODEC`, `PROFILE_UNAVAILABLE` (Bluetooth off, no proxy), `PROFILE_DISCONNECTED`, `SECURITY_EXCEPTION`, hand-back to `onSecurityException`, `ERROR` | P1 |
+| K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request | P1 |
+| K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
+| K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
+| K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3) | P1 |
+| K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, receiver enabled state, `isAssociationRequired(ForAutoApply)`, address case | P1 |
+| K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines | P1 |
+| K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
+
+The main screen's own logic stays in `MainActivity` (D1, D13), with its own
+profile proxy. Its cases are covered on the phones: the permission states by
+V1 and E1, logging observed codecs by B3 and B11, read failures by B8.
+
+### L2 UI tests
+
+Compose tests of the screens with fake state, no Bluetooth. They need the
+composables to take their state and callbacks as parameters (D1). Assertions
+use texts, content descriptions and test tags, not positions, so they survive
+the UI polish. The same tests run on the JVM and on every phone
+([section 7](#7-ui-tests-on-the-jvm-and-the-phones)).
+
+| ID | Test | Prio |
+| --- | --- | --- |
+| V1 | Permission screens: "Grant permission", and after a permanent denial the settings hint with "Open settings" | P2 |
+| V2 | Collapsed card: chips for codec, rate, size, LDAC adaptive or kbps; "Unsupported codec"; "No codec information" | P1 |
+| V3 | Status chip: "Preferred Codec" or the "Save As Preferred Codec" button, hidden when the codec is unreadable or unknown; saving passes the current codec | P1 |
+| V4 | Device menu: shown only with a preferred codec or a debug link; Restore only when the preferred codec isn't active; Delete; Unlink only in debug builds | P1 |
+| V5 | Link prompt: shown when the codec is unreadable, or a link is required and a preferred codec exists (the API 34–35 state); both texts; the "can't link" text without the companion feature; Allow disabled while linking | P1 |
+| V6 | Expanded card and codec selection: chips enabled from the capabilities, the selected chip, the LDAC bitrate row. Choosing a codec keeps the current rate and size if the new codec supports them, otherwise takes the first supported ones, preferring the capability that supports both; the codec passed to the callback | P1 |
+| V7 | Several devices, long names | P3 |
+| V8 | Log texts, with the sample log: the text of every event type, both validation texts, duration thresholds, interrupted operations | P1 |
+| V9 | Log structure: day headers, grouping of interleaved operations and of elements whose trigger was trimmed, standalone rows, "in progress", empty state, expand and collapse, JSON on long press, expanded state kept while scrolling | P1 |
+| V10 | Log screen updates while it's open | P2 |
+| V11 | Clear dialog (open operations stay) and share dialog (the chosen mode is exported) | P2 |
+| V12 | Screenshots in light and dark, font scales, landscape, screen sizes; after the UI polish (D5) | P3 |
+
+### L3 Bluetooth logic tests
+
+On the phones, with the app snippet loaded. The headset is connected over A2DP
+unless a test says otherwise.
+
+| ID | Test | Runs on | Needs | Prio |
+| --- | --- | --- | --- | --- |
+| B1 | Read contract: the codec the app reads equals `dumpsys`, the capabilities include the active codec | all | | P1 |
+| B2 | Apply each codec type the phone offers, parametrized from the capabilities: verified, `dumpsys` agrees. Then every offered rate, size and LDAC bitrate | all | | P1 types, P2 the rest |
+| B3 | Multi-step change with the main screen open: from LDAC 96 kHz, 32-bit, adaptive to 44.1 kHz, 24-bit, 909 kbps verifies within 5 attempts, and the intermediate codecs aren't logged as external changes (manual 1.3) | all | LDAC | P1 |
+| B4 | A target outside the capabilities resolves `MAX_ATTEMPTS` after 5 attempts and leaves the codec as it was | all | | P2 |
+| B5 | `ALREADY_PENDING` and `SUPERSEDED` with the real stack's timing (manual 1.4, 1.5) | all | | P2 |
+| B6 | A disconnected device resolves `NOT_CONNECTED` | all | A2DP switch | P2 |
+| B7 | The phone's Bluetooth off resolves `PROFILE_UNAVAILABLE`; off during a request `PROFILE_DISCONNECTED`; back on, the next request opens a new proxy and verifies (manual 2.3) | all | | P2 |
+| B8 | Links, with the main screen open. Without a link: up to 33 reading and changing work; on 34–35 changing resolves `NO_ASSOCIATION`; on 36 the codec is also unreadable, and the screen logs `READ_FAILED` once. With a link everything works | all | | P1 |
+| B9 | Observing: on with a preferred codec, off when it's deleted, and after clearing app data the next start turns it off (whether the link stays is recorded, 6.7) | 31+ | | P2 |
+| B10 | A device disappearing during a request resolves `CANCELLED` | 31+ | power switch | P3 |
+| B11 | A codec set bypassing the applier, with the main screen open, is logged once as `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE`; the app's own changes never are (manual 2.2) | all | | P2 |
+| B12 | A request while the service or receiver applies the preferred codec on connect supersedes it, and the requested codec wins | all | | P2 |
+
+### L4 Background and cold start tests
+
+Without the snippet and without touching the UI between the setup and the
+check. Each test starts from a defined process state: killed like the system
+does, never launched, force-stopped, after a reboot or after an update.
+
+| ID | Test | Runs on | Needs | Prio |
+| --- | --- | --- | --- | --- |
+| C1 | App process killed, the headset reconnects: the preferred codec is applied, by the receiver up to 30 and the service from 31 | all | | P1 |
+| C2 | The same with the app in the foreground and in the background but alive (manual 2.1) | all | | P1 |
+| C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
+| C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | end a bound process | P2 |
+| C5 | Permission revoked, the device connects: `NO_PERMISSION` is logged, no crash | 31+ | | P2 |
+| C6 | No preferred codec: the codec isn't touched, from 31 the app isn't even started | all | | P2 |
+| C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
+| C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
+| C9 | Never launched (fresh install) and force-stopped, then the device connects: records what happens. Characterization (D8) | all | | P2 |
+| C10 | The phone's Bluetooth turned off and on while the app is dead, then the device connects: applied | all | | P3 |
+| C11 | 20 reconnects in a row: every one verified, time to verified recorded | all | | P3 |
+| C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
+| C13 | Presence without A2DP: with a preferred codec and A2DP down, every time the device appears (phone Bluetooth on, headset back on) one operation resolves `NOT_CONNECTED` and nothing is applied; a device that stays present logs nothing more over 5 minutes. Characterization (D8) | 31+ | A2DP switch, power switch | P2 |
+
+### L5 Journeys
+
+Through the UI with UiAutomator, which runs in its own process (D4). They
+check that the parts work together, not every detail on the way.
+
+| ID | Journey | Runs on | Prio |
+| --- | --- | --- | --- |
+| E1 | First start: grant the permission in the system dialog, the card shows the codec `dumpsys` reports. Denying twice shows the settings hint | 31+ | P2 |
+| E2 | Choose codecs with the chips: `dumpsys`, the card and the log agree (manual 1.1) | all | P1 |
+| E3 | Save as preferred; from 31 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
+| E4 | A codec change in the developer options shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2) | all | P2 |
+| E5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone | all | P2 |
+| E6 | An unlinked device asks to be linked (on 36 because its codec is unreadable, on 34–35 once it has a preferred codec); Allow and the dialog make its codec appear and changeable | 34+ | P1 |
+| E7 | Rotating while a codec is applied: no crash, verified (manual 1.6) | all | P2 |
+| E8 | The log screen shows a real reconnect with its attempts; the anonymised export contains no addresses or names (log 2.5) | all | P2 |
+
+## 5. Where journeys are worth it
+
+Journeys are slow and break with UI changes, so they're kept to what only they
+can show:
+
+- **System UI the app depends on**: the permission dialog, the companion link
+  dialog and their results. No other level sees them.
+- **Closing the loop**: a choice on the screen changes the codec on the device,
+  and the device's codec shows on the screen. One journey per direction is
+  enough to prove the wiring.
+- **The core promise from the user's view**: save, reconnect, the codec is
+  there (E3).
+
+Everything else is covered more cheaply and more thoroughly elsewhere:
+
+| Behaviour | Covered by | Why not by journeys |
+| --- | --- | --- |
+| Every codec, rate, size and bitrate on the device | B2 | Through the snippet in seconds, through the UI in minutes per combination |
+| Retries, supersede, pending, timeouts | K1, K2, B3–B5 | Timing can't be controlled through the UI; the fake makes it deterministic |
+| Which chips, menus and prompts a device state shows, and which codec a chip selects | V2–V6 | Needs device states the testbed can't produce (API 34–35, no companion feature, unknown codec) |
+| Log texts for every event type | V8, V9 | Needs events that real Bluetooth rarely produces; the sample log has all of them |
+| Applying on connect in the background | C1–C13 | There must be no UI or snippet involved |
+| Anonymisation | `LogExportTest`, E8 once | Pure logic |
+
+## 6. Harness
+
+### 6.1 Layout
+
+```
+mobly_tests/
+  testbed.yaml            phones and their capabilities, headsets
+  run_suite.py            runs the suites one phone at a time, for one headset
+  lib/
+    device_state.py       exists: Bluetooth, screen, lock state
+    baseline.py           checks and restores the baseline state
+    headset.py            the Headset controller and its backends
+    app.py                install, verify the build, reset, launch, kill, permissions
+    app_log.py            read, parse and wait for events, labels, invariant checks
+    bt_oracle.py          A2DP connection and active codec from dumpsys, per API level
+    companion.py          links and observing, from cmd companiondevice and dumpsys
+    screens.py            screen objects for the main and log screens
+  tests/
+    bt_logic_test.py      L3
+    cold_start_test.py    L4
+    journey_test.py       L5
+    harness_test.py       self-tests against testdata/
+  testdata/               recorded dumpsys output and logs
+snippet/                  the app snippet module (section 8)
+app/src/sharedTest/       the UI tests, for the JVM and the phones (section 7)
+```
+
+### 6.2 Baseline state
+
+Every Mobly test starts from the same state and leaves it behind. It's the
+state of a user who has set the app up and listens with the headset, but
+hasn't saved a preferred codec:
+
+| Part | Baseline | Checked with | Restored by |
+| --- | --- | --- | --- |
+| Build | The build under test, its version stamp matches the working tree | `dumpsys package` | Installing, only in the suite setup, never between tests |
+| App data | Log empty, all settings at their defaults, so no preferred codecs | `run-as` listing `files/` and `shared_prefs/` | Resetting the app data, see below |
+| Package | Not stopped, so manifest receivers get broadcasts | `dumpsys package` | A broadcast to `TestLabelReceiver` without a label |
+| Nearby devices permission (31+) | Granted, not marked user-set or user-fixed | `dumpsys package` | `pm grant`, `pm clear-permission-flags` |
+| Link | The headset is linked on every phone, also where the app doesn't need it; nothing is observed | `cmd companiondevice list`; observing from `dumpsys companiondevice` on 33+, from the system's file with root on 31–32 | `cmd companiondevice disassociate` and `associate`, which also ends observing |
+| Phone Bluetooth | On; every other phone on adb off | `device_state` | `device_state.set_bluetooth` |
+| A2DP | The headset is connected and the active device | `bt_oracle` | The connect fixture, [6.6](#66-connecting-the-headset) |
+| Headset | Its normal state (Qudelix: `normal`) | The backend | The backend |
+| Codec | The phone's own choice: what the stack picks on connect when the app has no preferred codec, recorded per phone in `setup_class` (D11) | `bt_oracle` | A reconnect |
+| Screen | On and unlocked, the launcher in front | `device_state` | Home key; on and unlocked are only checked (D15) |
+
+Not part of the baseline:
+
+- Whether the app process runs. Tests that care set it: killed, in the
+  background, in front. Resetting the app data ends it, so no state survives
+  in memory.
+- Settings a test changes for itself, like Doze or the standby bucket. That
+  test puts them back in its own teardown.
+
+**Checking and restoring.**
+
+- `setup_class` brings the phone into the baseline: it checks the build, then
+  restores everything else.
+- Before each test, `baseline.check()` reads every part. They're all shell
+  reads, about 3 s together, and none of them starts the app process.
+- After each test, `baseline.restore()` puts back the parts that differ and
+  checks again.
+- A difference found before a test means the previous test's restore missed
+  something. It's repaired, and reported as a leak against that test. If the
+  repair fails, the rest of the class is aborted instead of failing every test
+  for the same reason (D12).
+- The order of a restore matters: app data first, so the reconnect doesn't
+  apply a preferred codec; then permission, link and package; then the phone's
+  Bluetooth, the headset and A2DP; then the codec; the screen last.
+
+**Resetting the app data.** `pm clear` resets everything the app stores,
+including settings added later, and ends the process in the same step. What
+else it resets (the permission, the link, observing, the stopped state) is to
+check in the spike; the restore repairs those afterwards, which is why the
+check runs again after it. If `pm clear` removes something the harness can't
+put back, the fallback is ending the process and deleting the files with
+`run-as`.
+
+While the snippet is loaded (L3), the process can't end without unloading it,
+so the snippet resets the app's state instead (`resetForTest`, section 8), and
+the other parts are restored as above.
+
+### 6.3 Headsets
+
+Most connect and disconnect tests can be driven from two sides: by the headset
+itself (the Qudelix over USB), or by the phone (its Bluetooth adapter over adb),
+which works with any headset. Running the tests with another headset is useful
+to diagnose a problem with that headset, so the harness abstracts it.
+
+`headset.py` is a Mobly controller module (`MOBLY_CONTROLLER_CONFIG_NAME =
+"Headset"`). Tests only use its interface:
+
+| Operation | For the app | Qudelix backend | Phone backend (any headset) |
+| --- | --- | --- | --- |
+| `reconnect()` | The device goes away and comes back, like switching it off and on | `cycle` | The phone's Bluetooth off and on |
+| `disconnect_a2dp()`, `connect_a2dp()` | A2DP goes down and up, the device stays present | `no-a2dp`, `normal` | – |
+| `power_off()`, `power_on()` | The device disappears and appears, the phone's Bluetooth stays on | `bt-off`, reset to `normal` | – |
+| `ensure_connected()` | The connect fixture, 6.6 | | |
+| `check()`, `restore()` | Its part of the baseline | Mode is `normal` | Nothing to check |
+| `address`, `name` | | From `testbed.yaml` | From `testbed.yaml` |
+
+The rows with a dash are the headset capabilities **A2DP switch** and **power
+switch**. A test that needs one is skipped with a headset that lacks it. With
+the phone backend, `reconnect()` also turns the app's profile proxy off and on;
+tests whose subject is the phone's adapter (B7, C10) call `device_state`
+directly and run with every headset.
+
+**Separate testbeds, not separate tests.** The headset is part of the testbed
+configuration, and the same tests run with each:
+
+- The tests are about how the app reacts when a device connects. How that's
+  caused is hardware, which belongs in the testbed config.
+- Separate tests would duplicate every connect test per backend, and every run
+  would need both kinds of hardware.
+- A new headset is a new entry in `testbed.yaml`, no code. Its results are
+  reported under its own testbed name, which is what diagnosing it needs.
+- What only one backend can do is either a capability (the test is skipped
+  elsewhere) or a test of its own (the phone's adapter: B7, C10).
+
+```yaml
+phones:
+  - serial: 0000000028
+  - serial: 0000000032
+  - serial: R0000000036
+    secure_lock_screen: true
+headsets:
+  qudelix:
+    backend: qudelix
+    address: "0A:1B:2C:3D:4E:5F"
+  my-headphones:
+    backend: phone
+    address: "…"
+```
+
+`run_suite.py --headset qudelix` writes a Mobly config per phone, with that
+phone and that headset, and names the testbed after both.
+
+### 6.4 Waiting
+
+Tests poll with a timeout instead of sleeping. The timeouts come from the app's
+constants: a request verifies or gives up within about 3 s once the profile
+proxy is connected (5 attempts, 500 ms apart), the receiver gives up after
+15 s, the main screen reads the codec every second. On API 32 a device
+disappears 7–8 s after its BLE advertisements stop. A Qudelix `cycle` takes
+5 s off plus its reboot. A timeout fails the test with the log tail and the
+current `dumpsys` state.
+
+### 6.5 Log assertions
+
+`app_log.py` returns operations, not lines:
+
+```python
+mark = log.label("C1 cold connect")          # not inside cold start windows
+headset.reconnect()
+op = log.wait_for_operation(after=mark, trigger="A2DP_CONNECTED", device=headset.address, timeout=30)
+assert op.resolution == "CODEC_VERIFIED"
+assert bt_oracle.active_codec(ad, headset.address) == preferred
+```
+
+After every device test the whole log is checked for invariants: every
+operation starts with its trigger and has at most one resolution, `seq`
+increases, nothing stays unresolved, no unexpected `OPERATION_INTERRUPTED`,
+and the crash buffer of Logcat has nothing from the app. A structure violation
+throws in debug builds, so it shows up as a crash. The structure check already
+exists in [sample_event_log.py](tools/sample_event_log.py) and moves to the
+shared library.
+
+### 6.6 Connecting the headset
+
+"A2DP connected to the phone under test" is the hardest part of the baseline.
+The harness assumes a headset can only connect to the phones on adb (D6), and
+`testbed_session.py` keeps all of them with Bluetooth off until a test turns
+it on for the phone under test. The fixture:
+
+1. Checks `dumpsys`, done if connected.
+2. Calls the backend's `reconnect()`, then waits.
+3. Fails with diagnostics.
+
+The sanity checks (6.9) make sure step 2 works for a phone before its tests
+start.
+
+During the first review, cycling the Qudelix didn't connect A2DP to the API 32
+Pixel within 45 s, and the Pixel didn't connect on its own ("most recently
+active a2dp device is null"). The spike finds out why.
+
+Fixture steps like these are retried; assertions never are. A test that fails
+is rerun by hand or with a flag, and tests known to be flaky are listed with
+their cause instead of being retried silently.
+
+### 6.7 Characterization tests
+
+C3, C9 and C13 assert how the app and the system behave today, as the baseline
+for later changes (D8). The same goes for any other test whose outcome on a
+phone isn't known in advance, like what `pm clear` does to the link in B9.
+
+Each starts as an observation. The first run on each phone records what
+happens: the operations in the log with their resolutions, and `dumpsys`. That
+result is written into the test as its expectation, keyed by API level and,
+where it differs, by headset backend. A later run that differs fails, so a
+change in the app or a new Android version shows up as a difference someone
+decides about. The component tests (K5) describe the same behaviour from the
+code's side.
+
+### 6.8 On failure
+
+Collected per test: the event log, Logcat since the test started, the A2DP part
+of `dumpsys bluetooth_manager`, `dumpsys companiondevice`, a screenshot and a UI
+dump, and the headset's status.
+
+### 6.9 Running
+
+Prepared once per phone, outside the suite: developer options and USB
+debugging on, the headsets paired. Saving and restoring a phone's own app data,
+like the S24's, is outside the suite too (D7).
+
+1. Start `testbed_session.py` in one terminal.
+2. `run_suite.py --headset qudelix` runs, on each phone on adb, one after the
+   other: the sanity checks, Bluetooth on, the L2 tests (section 7), the
+   journeys, then L3 and L4, Bluetooth off. The journeys need the screen on,
+   so they run before the tests that turn it off or reboot.
+3. Every phone runs every test its API level and capabilities allow.
+
+The suite doesn't change the settings `testbed_session.py` takes care of
+(D15). It checks them, and a phone that fails a sanity check fails right away
+instead of failing every test:
+
+- The phone is on adb, plugged in, its screen on and unlocked, and
+  `stay_on_while_plugged_in` includes USB.
+- No other phone on adb has Bluetooth on.
+- The headset is paired with the phone.
+- With the phone's Bluetooth turned on, the headset connects over A2DP.
+- The installed build's version stamp matches the working tree.
+
+L0 to L2 on the JVM: `./gradlew testDebugUnitTest`.
+
+## 7. UI tests on the JVM and the phones
+
+The L2 tests are written once and run in two places: on the JVM with
+Robolectric on every build, and on each phone during a suite run (D2). The
+setup:
+
+1. **One source directory for both.** The tests live in
+   `app/src/sharedTest/java`, which `app/build.gradle.kts` adds to both test
+   source sets:
+
+   ```kotlin
+   sourceSets {
+       getByName("test") {
+           java.srcDir("src/sharedTest/java")
+           resources.srcDir("src/sharedTest/resources")
+       }
+       getByName("androidTest") {
+           java.srcDir("src/sharedTest/java")
+           resources.srcDir("src/sharedTest/resources")
+       }
+   }
+   ```
+
+   Android Studio indexes a directory shared by two source sets for only one of
+   them ("Duplicate content roots detected"). Gradle builds and runs both; in
+   the IDE they show up as unit tests.
+2. **Only what exists in both places.** The tests use
+   `@RunWith(AndroidJUnit4::class)`, which runs them with Robolectric on the JVM
+   and with `AndroidJUnitRunner` on a phone, and `createComposeRule()`, whose
+   empty activity comes from the test manifest already in the debug build. No
+   Robolectric shadows and no `@Config` in shared tests. The screens get their
+   state as parameters, so the UI tests don't depend on the SDK level; the SDK
+   level logic is tested in L1, which stays on the JVM.
+3. **Dependencies.** `testImplementation` of Robolectric, `androidx.test.ext:junit`
+   and `ui-test-junit4` (with the Compose BOM); `androidTestImplementation`
+   already has the last two, and `debugImplementation` the test manifest.
+   `testOptions.unitTests.isIncludeAndroidResources = true` lets Robolectric
+   see the app's strings and themes. The SDK level of the JVM run goes into
+   `app/src/test/resources/robolectric.properties`.
+4. **An unlocked phone.** Compose tests need a visible window. The phones are
+   unlocked during a run (D15), so no activity that shows over the lock screen
+   is needed.
+5. **Independent of the phone's clock, time zone and locale.** The phones'
+   clocks differ, and their locales may. The log screen takes the current date
+   as a parameter, and texts with dates and times are compared with values
+   from the same formatter. The sample log is a test resource with fixed times,
+   generated once by [sample_event_log.py](tools/sample_event_log.py) and read
+   through the class loader, which works on the JVM and in the test APK.
+6. **Running on a phone.** `run_suite.py` installs the app and the test APK
+   (`installDebug installDebugAndroidTest`) and runs
+   `am instrument -w -r com.tt.autobluetoothcodec.test/androidx.test.runner.AndroidJUnitRunner`
+   on the phone under test. Not `connectedDebugAndroidTest`: it runs on all
+   phones at once and uninstalls the app afterwards, which drops its links.
+   `am instrument` force-stops the app, so the baseline restore runs after the
+   UI tests.
+7. **Screenshot tests** (V12) come after the UI polish (D5): on the JVM with
+   Robolectric's native graphics, for example with Roborazzi. On the phones
+   the pixels differ per device, so screenshots there are for looking at, not
+   for comparing.
+
+## 8. Snippet module
+
+The snippet needs the app's internals: the `CodecApplier` singleton, the
+stores and the log (D3). A separate module gives it that:
+
+- `:snippet` uses the `com.android.test` plugin with `targetProjectPath =
+  ":app"`. It compiles against the app's classes, and its APK runs as
+  instrumentation inside the app's process, with the app's class loader.
+  `CodecApplier.get(context)` in the snippet returns the instance the app's
+  service and activities use.
+- `testInstrumentationRunner = "com.google.android.mobly.snippet.SnippetRunner"`,
+  the dependency `com.google.android.mobly:mobly-snippet-lib`, the snippet
+  classes in the manifest's `mobly-snippets` meta-data, application id
+  `com.tt.autobluetoothcodec.snippet`. Mobly loads it with
+  `ad.load_snippet("app", "com.tt.autobluetoothcodec.snippet")`.
+- It reaches the app's public declarations. Kotlin's `internal` is visible to
+  the app's own test source sets, not to another module. Everything the RPCs
+  need is public today (`CodecApplier.apply`, `cancel` and `pending`,
+  `A2dpProfileUtil`, `PreferredCodecStore`, `EventLog.get`,
+  `CompanionPresence.syncAll`). The reset functions (section 9) are public and
+  marked `@VisibleForTesting`.
+- A module has one test runner. The app's own `androidTest` keeps
+  `AndroidJUnitRunner` for the UI tests, which is the other reason the snippet
+  doesn't go there.
+- The release build contains none of it; the debug build only adds
+  `TestLabelReceiver`.
+
+RPCs: `applyCodec` (through `CodecApplier`, returns the resolution),
+`setCodecDirectly` (bypassing the applier, like another app would),
+`getCurrentCodec`, `getCapabilities`, `getPreferredCodec`, `setPreferredCodec`,
+`deletePreferredCodec`, `getPending`, `syncPresence` and `resetForTest` (log,
+stores and singletons back to their defaults). Codecs pass as the app's own
+JSON. The RPCs run on the main thread, like the app's own calls.
+
+## 9. App changes for testability
+
+1. A version stamp in debug builds, for example the commit as `versionNameSuffix`,
+   so the harness can tell what's installed.
+2. `testTagsAsResourceId` on the root of both screens, and test tags on the
+   elements tests use: the device card per address, chips, status chip, menu
+   items, the link button, log entries per `seq`.
+3. Composables as top-level functions that take state and callbacks, so UI
+   tests can render them with fake data. The activities keep their logic (D1);
+   the helpers the composables call move with them (D13). The log screen takes
+   the current date as a parameter.
+4. `CodecApplier` gets its Bluetooth access through a small interface
+   (connection state, read, write, adapter enabled), so component tests can
+   replace it. Its `get()` stays as it is for the app.
+5. A way to reset the `EventLog` and `CodecApplier` singletons in tests, public
+   for the snippet.
+6. The snippet module (section 8).
+7. `TestLabelReceiver` stays a broadcast receiver: it has to work without the
+   snippet, in cold start tests.
+
+When R8 is enabled for release builds, a smoke test of the release build is
+needed too: `A2dpProfileUtil` uses reflection and the codecs are serialized by
+name, both of which minification can break.
+
+## 10. Implementation order
+
+Each step ends with something that runs and is committed on its own. A step
+needs the ones before it unless it says otherwise.
+
+0. **Testbed preparation** (by hand, once): pair every phone with the
+   Qudelix. Done.
+1. **Spike** — answer the unknowns that change the design, and write the
+   answers into this document:
+   1. Snippet: a `:snippet` module with one RPC (`getPending`) loads on every
+      phone and sees the app's instance. What loading and unloading do to the
+      process and the stopped state.
+   2. Shared UI tests: one Compose test runs with `testDebugUnitTest` and with
+      `am instrument` on every phone.
+   3. Baseline: what `pm clear` resets besides the data; whether
+      `pm clear-permission-flags` works; how to end a process the companion
+      service keeps bound (`am kill`, `run-as … kill`); `cmd companiondevice
+      associate` on the S24; whether a reconnect brings the codec back to the
+      phone's own choice (D11).
+   4. Headset: why the Qudelix didn't connect to the API 32 Pixel; whether it
+      connects to whichever paired phone has Bluetooth on; whether any adb
+      command switches A2DP alone (D14).
+   5. Recordings: `dumpsys bluetooth_manager` and `dumpsys companiondevice`
+      with the Qudelix connected, from every phone, as test data for the
+      parsers.
+2. **App changes** in small commits: version stamp; test tags; reset
+   functions; the `CodecApplier` Bluetooth interface; composables as top-level
+   functions (D13). The composable split happens now,
+   not with the UI polish: the UI tests then guard the polish, and since they
+   assert texts and tags, not layout, the polish changes few of them.
+3. **JVM setup and L0**: Robolectric, the shared source directory,
+   `robolectric.properties`; U1–U7; the example tests go.
+4. **L1 P1**: K1, K2, K4, K5, K6, K7.
+5. **L2 P1 on the JVM**: V2–V6, V8, V9. With this step everything that runs
+   without a phone has its P1 tests.
+6. **Harness core**, testable without phones first: the `bt_oracle` and
+   `companion` parsers with self-tests against the recordings; `app_log` with
+   the invariant checks; the `Headset` controller with the Qudelix backend;
+   `app.py`; `testbed.yaml`; `run_suite.py` with per-phone configs and failure
+   artifacts. Steps 3 to 5 and this one don't depend on each other.
+7. **Baseline**: the sanity checks, `baseline.py` with check and restore, and
+   the connect fixture. A smoke class whose empty tests only run check,
+   restore and check on every phone, many times in a row. The baseline has to
+   be stable before tests build on it.
+8. **L2 on the phones**: `run_suite.py` runs the shared UI tests on every
+   phone.
+9. **Snippet module and L3 P1**: the RPCs; B1, B2 (codec types), B3, B8.
+10. **L4 P1**: C1, C2, C3.
+11. **L5 P1**: `snippet-uiautomator`, `screens.py`; E2, E3, E6. With this step the core promise is
+    covered end to end on every phone.
+12. **P2 of all levels**, including C9, C13 and the phone backend of the
+    `Headset` controller. Then every case of the manual test records is
+    automated, and they're deleted (D10).
+13. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
+    test once R8 is enabled.
+
+## 11. Existing manual tests
+
+| Manual test | Becomes |
+| --- | --- |
+| Codec applier 1.1 Choose a codec | B2, E2, U2 |
+| 1.2 Restore | E4 |
+| 1.3 Restore over several attempts | B3 |
+| 1.4 Restore twice | B5, K2 |
+| 1.5 Choose while restoring | B5, K2 |
+| 1.6 Rotate while restoring | E7 |
+| 2.1 Reconnect with the app open | C2 |
+| 2.2 Developer options change | B11, E4 |
+| 2.3 Bluetooth off and on | B7, K3 |
+| Not covered: linking before applying, refusal hand-back, receiver deadline, `PROFILE_UNAVAILABLE` | E6, K1, K4, B7 |
+| Log UI 1.1–1.6 smoke tests | V9, V11, E8 |
+| 2.1 Load the sample log | K7 |
+| 2.2–2.4 Entries | V8, V9 |
+| 2.5 Anonymised export | `LogExportTest`, E8 |
+| Not covered: clearing, live updates | V11, V10 |
+
+The records inform the automated tests and are deleted once all their cases
+are automated (D10), which is after step 12 of the implementation order. E7 is
+P2 for that reason. What stays manual: looking at the screenshots.
+
+## 12. Observations from the testbed
+
+Checked on 2026-10-27 while writing this concept:
+
+- The second Pixel runs API 32, not 31.
+- The debug build on the API 32 Pixel predated the shared `CodecApplier`: its
+  log has `CANCELLED` events with the message "applier closed", which the
+  current code doesn't write.
+- The API 28 Pixel had no bond with the Qudelix; it has been paired since.
+- On the API 32 Pixel, turning Bluetooth on made the companion device manager
+  start a BLE scan filtered on the Qudelix's address. `DEVICE_APPEARED` came
+  less than a second later, without a classic connection; `DEVICE_DISAPPEARED`
+  came 7–8 s after the Qudelix or the phone turned Bluetooth off.
+- Neither turning Bluetooth on nor `qudelix5k.py cycle` connected A2DP to that
+  Pixel within 45 s.
+- `cmd companiondevice` offers `list`, `associate` and `disassociate` on API 28
+  and 32. `cmd bluetooth_manager` doesn't exist there.
+- With no device connected, the A2DP part of `dumpsys bluetooth_manager` on
+  API 32 lists only the codec priorities, so the codec parser still needs a
+  dump with a connected device from each phone.
+- `TestLabelReceiver` returns before touching the log when the broadcast has
+  no label, but the broadcast still starts the process. That's what takes the
+  package out of the stopped state without writing to the log.
+
+## 13. Decisions
+
+- **D1** Refactor for testability: yes, except moving logic out of the
+  activities (section 9).
+- **D2** Robolectric for L1 and L2, and L2 also runs on every phone
+  (section 7).
+- **D3** The snippet is a separate `com.android.test` module; it reaches the
+  app's internals (section 8).
+- **D4** `snippet-uiautomator` with test tags exposed as resource ids, for the
+  journeys.
+- **D5** Screenshot tests after the UI polish; noted in the
+  [development plan](DevelopmentPlan.md).
+- **D6** A headset can only connect to the phones on adb.
+- **D7** No special cases per phone. Tests are skipped only for what can't
+  work without root or with a secure lock screen. Saving and restoring a
+  phone's own data is outside the suite.
+- **D8** Everything that was in question gets tested: C3, C9 and C13 assert
+  today's behaviour as the baseline for later changes (6.7).
+- **D9** Fixtures link with `cmd companiondevice associate`; the system dialog
+  only appears in E3 and E6.
+- **D10** The manual test records are deleted once their cases are automated.
+- **D11** The baseline codec is the phone's own choice, restored by a
+  reconnect. Tests that need another codec use SBC 44.1 kHz, 16-bit, or, where
+  the phone's own choice is SBC, the first other codec in the capabilities.
+- **D12** A broken baseline before a test is repaired and reported as a leak of
+  the previous test; if the repair fails, the class is aborted, so one failure
+  doesn't spread to every following test. App data is reset with `pm clear`,
+  with deleting the files as the fallback.
+- **D13** The helpers the composables call (codec selection, log texts and
+  grouping) move with them to the top level of the same file, as private
+  functions where possible. If that turns out not to work or to be more
+  complicated than expected, it's raised again.
+- **D14** The phone backend switches only the phone's Bluetooth adapter. More
+  for other headsets, like the "Media audio" switch or an operator backend, is
+  out of scope.
+- **D15** `testbed_session.py` keeps the phones awake and their other
+  Bluetooth off, and warns when one is locked. The suite doesn't change these
+  settings; it runs sanity checks and fails early (6.9). The phones, the S24
+  included, are unlocked during a run.
