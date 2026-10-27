@@ -186,8 +186,8 @@ class LogActivity : ComponentActivity() {
             EventType.USER_LINK_DEVICE -> "Linking device"
             EventType.SET_CODEC_CONFIG -> "Setting codec" + (event.attempt?.let { ", attempt $it" } ?: "") + ": $config"
             EventType.VALIDATE_CODEC_CONFIG -> when {
-                event.actual == null -> "Codec not applied yet, no codec reported"
-                event.actual.own != event.config?.own -> "Codec not applied yet, active: $actual"
+                event.actual == null -> "Codec change incomplete, no codec reported"
+                event.actual.own != event.config?.own -> "Codec change incomplete, active: $actual"
                 else -> "Codec validated: $actual"
             }
             EventType.ASSOCIATION_REQUESTED -> "Asked to link the device"
@@ -195,11 +195,11 @@ class LogActivity : ComponentActivity() {
             EventType.CODEC_SET_SENT -> "Codec change sent"
             EventType.PREFERRED_SAVED -> "Preferred codec saved"
             EventType.ASSOCIATION_CREATED -> "Device linked"
-            EventType.ASSOCIATION_FAILED -> "Device wasn't linked"
+            EventType.ASSOCIATION_FAILED -> "Linking device failed"
             EventType.MAX_ATTEMPTS -> "Codec not applied after ${event.attempt} attempts" +
                     (event.actual?.let { ", still ${it.describe()}" } ?: "")
             EventType.NOT_CONNECTED -> "Audio not connected yet"
-            EventType.NO_ASSOCIATION -> "Device isn't linked, so the codec can't be changed"
+            EventType.NO_ASSOCIATION -> "Device isn't linked"
             EventType.NO_PREFERRED_CODEC -> "No preferred codec"
             EventType.NO_PERMISSION -> "Nearby devices permission missing"
             EventType.SECURITY_EXCEPTION -> "Bluetooth refused the codec change"
@@ -209,7 +209,7 @@ class LogActivity : ComponentActivity() {
             EventType.CANCELLED -> "Cancelled"
             EventType.ALREADY_PENDING -> "Already in progress"
             EventType.ERROR -> "Failed"
-            EventType.OPERATION_INTERRUPTED -> "Never finished, the app stopped running first"
+            EventType.OPERATION_INTERRUPTED -> "Interrupted, app was stopped"
             EventType.DEVICE_DISAPPEARED -> "Device disconnected"
             EventType.ACTIVITY_OBSERVED_CODEC_CHANGE -> "App observed a different active codec: $actual"
             EventType.READ_FAILED -> "Couldn't read the codec"
