@@ -41,7 +41,7 @@ class Headset:
         self.address = config["address"].upper()
         self.name = config.get("name", self.address)
 
-    def reconnect(self, ad):
+    def reconnect(self, adb):
         """The device goes away and comes back, like switching it off and on.
 
         A full reconnect brings the codec back to the phone's own choice; an
@@ -105,7 +105,7 @@ class QudelixHeadset(Headset):
         finally:
             device.close()
 
-    def reconnect(self, ad):
+    def reconnect(self, adb):
         self._set("bt-off")
         time.sleep(self.OFF_SECONDS)
         self._set("normal")
@@ -134,10 +134,10 @@ class PhoneHeadset(Headset):
     backend = "phone"
     OFF_SECONDS = 3.0
 
-    def reconnect(self, ad):
-        device_state.set_bluetooth(ad.adb, False)
+    def reconnect(self, adb):
+        device_state.set_bluetooth(adb, False)
         time.sleep(self.OFF_SECONDS)
-        device_state.set_bluetooth(ad.adb, True)
+        device_state.set_bluetooth(adb, True)
 
 
 BACKENDS = {cls.backend: cls for cls in (QudelixHeadset, PhoneHeadset)}

@@ -419,16 +419,18 @@ Not part of the baseline:
 
 **Resetting the app data.** `pm clear` resets everything the app stores,
 including settings added later, and ends the process in the same step. It
-also revokes the permission and clears its flags, but keeps the link and
-observing, and doesn't stop the package (checked on API 28 and 32). The
-restore grants the permission and relinks afterwards, which is why the check
-runs again after it. If `pm clear` turns out to remove something the harness
-can't put back, the fallback is ending the process and deleting the files
-with `run-as`.
+also revokes the permission and clears its flags, and doesn't stop the
+package. On API 28 and 32 it keeps the link and observing; on API 36 it
+removes the link. So the restore relinks first, which ends observing and lets
+the reset delete anything relinking made the app log, then resets the data,
+links again where the reset removed the link, and grants the permission. The
+check runs again after it.
 
-While the snippet is loaded (L3), the process can't end without unloading it,
-so the snippet resets the app's state instead (`resetForTest`, section 8), and
-the other parts are restored as above.
+The L3 tests load the snippet in their setup, after the baseline check, and
+unload it in their teardown, before the restore. Loading it restarts the app
+anyway, and this way the restore works the same for every test. The
+snippet's `resetForTest` is there for tests that need a clean state in the
+middle.
 
 ### 6.3 Headsets
 
@@ -529,12 +531,18 @@ it on for the phone under test. The fixture:
 The sanity checks (6.9) make sure step 2 works for a phone before its tests
 start.
 
-When Bluetooth turns on, a phone only connects on its own to its most recently
+When Bluetooth turns on, a Pixel only connects on its own to its most recently
 active A2DP device, and after a `cycle` the Qudelix only reconnects to the
 phone it served last. So each phone has to connect to the headset once from
-its Bluetooth settings, as part of preparing it. After that, turning the
-phone's Bluetooth on connects within 6–8 s, whichever phone the Qudelix served
-before.
+its Bluetooth settings, as part of preparing it. After that, turning a Pixel's
+Bluetooth on connects within 6–8 s, whichever phone the Qudelix served before.
+
+The S24 never connects on its own when its Bluetooth is turned on over adb. A
+`cycle` reconnects it, but only if it was the last phone the Qudelix served.
+So after a Pixel's run, the S24 needs one connect started from the S24 again
+(an open question, see the end of section 13). The fixture waits 15 s after
+Bluetooth turns on, then reconnects the headset once; the sanity check uses
+the same fixture.
 
 Fixture steps like these are retried; assertions never are. A test that fails
 is rerun by hand or with a flag, and tests known to be flaky are listed with
@@ -756,8 +764,8 @@ needs the ones before it unless it says otherwise.
    the invariant checks; the `Headset` controller with the Qudelix backend;
    `app.py`; `testbed.yaml`; `run_suite.py` with per-phone configs and failure
    artifacts. Steps 3 to 5 and this one don't depend on each other.
-7. **Baseline**: the sanity checks, `baseline.py` with check and restore, and
-   the connect fixture. A smoke class whose empty tests only run check,
+7. **Baseline** (done): the sanity checks, `baseline.py` with check and
+   restore, and the connect fixture. A smoke class whose empty tests only run check,
    restore and check on every phone, many times in a row. The baseline has to
    be stable before tests build on it.
 8. **L2 on the phones**: `run_suite.py` runs the shared UI tests on every
@@ -812,9 +820,16 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   API 32 Pixel or the S24: their most recently active A2DP device wasn't the
   Qudelix. After one connect from the Bluetooth settings, both connect within
   6–8 s of Bluetooth turning on, and a `cycle` reconnects within seconds.
-- The phones' own codec with the Qudelix is LDAC 96 kHz, 32-bit on both
-  Pixels. The S24 had the app's preferred codec applied, LDAC 44.1 kHz,
-  24-bit, so its own choice is still to record.
+- The phones' own codec with the Qudelix, recorded by the baseline, is LDAC
+  96 kHz, 32-bit with the system default bitrate on all three phones.
+- The baseline smoke suite (step 7) passes on all three phones: each test
+  breaks one part of the baseline, and the next finds it restored.
+- `pm clear` on API 36 also removes the app's companion links.
+- On the S24, turning Bluetooth on over adb doesn't reconnect the Qudelix,
+  even right after it was connected. A `cycle` does, if the S24 was the last
+  phone. It also offers `cmd companiondevice simulate-device-appeared` and
+  `simulate-device-disappeared`, which could drive presence without a power
+  switch.
 - `pm clear` on API 28 and 32: data deleted, process ended, permission revoked
   with its flags cleared, link kept, package not stopped. On API 32 the app
   still got `DEVICE_APPEARED` afterwards, so observing survives it too.
@@ -882,3 +897,18 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   Bluetooth off, and warns when one is locked. The suite doesn't change these
   settings; it runs sanity checks and fails early (6.9). The phones, the S24
   included, are unlocked during a run.
+
+### Open
+
+**D16. How does the S24 get connected after a Pixel's run?** It doesn't
+connect on its own when its Bluetooth turns on, and a Qudelix `cycle` only
+reconnects the phone the Qudelix served last (6.6).
+- (a) The connect fixture taps the headset by name in the phone's Bluetooth
+  settings with UiAutomator, when Bluetooth on and one reconnect didn't
+  connect it. Works the same on the Pixels and the S24, needs the phone
+  unlocked, which it is during a run.
+- (b) You connect the S24 by hand before its run; the sanity check fails
+  until then.
+- (c) The S24 always runs first, which still needs (b) after a Pixel's run.
+
+*Recommendation:* (a).

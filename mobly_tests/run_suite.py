@@ -16,6 +16,11 @@ off or reboot.
 Usage, from this folder:
   .venv/Scripts/python run_suite.py --build
   .venv/Scripts/python run_suite.py --suite ui --phone <serial>
+Before a phone's tests, sanity checks make sure it's plugged in, awake,
+unlocked, alone with Bluetooth on, and that the headset connects when
+Bluetooth turns on; a phone that fails them is skipped. `--suite smoke`
+checks that the baseline is stable.
+
 Results go to results/<time>/, one Mobly log directory per phone and suite.
 """
 
@@ -23,6 +28,7 @@ import argparse
 import datetime
 import importlib
 import inspect
+import logging
 import os
 import pathlib
 import subprocess
@@ -36,10 +42,14 @@ from mobly.controllers.android_device_lib.adb import AdbProxy
 
 from lib import app
 from lib import device_state
+from lib import headset as headset_controller
+from lib import sanity
 from lib.device_test import DeviceTest
 
 HERE = pathlib.Path(__file__).resolve().parent
 SUITES = ["ui", "journeys", "bt_logic", "cold_start"]
+# Checks that the baseline is stable, run on its own with --suite smoke
+SMOKE = "smoke"
 
 
 def load_testbed(path):
@@ -96,6 +106,8 @@ def run_mobly(config_path, suite, tests=None):
         for cls in test_classes(suite):
             runner.add_test_class(config, cls, tests=tests)
         runner.run()
+    # Mobly leaves the root logger at DEBUG, which would print every adb command from here on
+    logging.getLogger().setLevel(logging.WARNING)
     return runner.results.is_all_pass
 
 
@@ -107,10 +119,19 @@ def run_ui(adb, directory):
     return failures == 0
 
 
-def run_phone(serial, phone, headset_name, headset, suites, directory, tests):
+def failed_sanity(problems):
+    for problem in problems:
+        print(f"  sanity check failed: {problem}")
+    return {"sanity": False}
+
+
+def run_phone(serial, phone, headset_name, headset, suites, directory, tests, other_serials):
     adb = AdbProxy(serial)
     print(f"{device_state.model(adb)} ({serial}), API {app.sdk(adb)}")
     directory.mkdir(parents=True, exist_ok=True)
+    problems = sanity.phone_problems(adb, other_serials)
+    if problems:
+        return failed_sanity(problems)
     results = {}
     if "ui" in suites:
         results["ui"] = run_ui(adb, directory)
@@ -118,8 +139,11 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests):
     if not device_suites:
         return results
     config = mobly_config(directory, serial, phone, headset_name, headset)
-    device_state.set_bluetooth(adb, True)
     try:
+        problems = sanity.connect_problems(adb, headset_controller.create([headset])[0])
+        if problems:
+            results.update(failed_sanity(problems))
+            return results
         for suite in device_suites:
             results[suite] = run_mobly(config, suite, tests)
     finally:
@@ -131,7 +155,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--headset", default="qudelix", help="a headset of testbed.yaml (default qudelix)")
     ap.add_argument("--phone", action="append", help="serial of a phone to test, all on adb by default")
-    ap.add_argument("--suite", action="append", choices=SUITES + ["smoke"], help="suites to run, all by default")
+    ap.add_argument("--suite", action="append", choices=SUITES + [SMOKE], help="suites to run, all but smoke by default")
     ap.add_argument("--test", action="append", help="run only these tests of the device suites")
     ap.add_argument("--build", action="store_true", help="build with Gradle first")
     ap.add_argument("--no-install", action="store_true", help="test the build that is installed")
@@ -146,7 +170,7 @@ def main():
     missing = [s for s in serials if s not in on_adb or s not in phones]
     if missing:
         sys.exit(f"not on adb or not in {args.testbed.name}: {', '.join(missing)}")
-    suites = [s for s in SUITES + ["smoke"] if s in (args.suite or SUITES)]
+    suites = [s for s in SUITES + [SMOKE] if s in (args.suite or SUITES)]
 
     if args.build:
         build()
@@ -155,8 +179,9 @@ def main():
     for serial in serials:
         if not args.no_install:
             install(AdbProxy(serial))
+        others = [s for s in on_adb if s != serial]
         summary[serial] = run_phone(serial, phones[serial], args.headset, headsets[args.headset], suites,
-                                    directory / serial, args.test)
+                                    directory / serial, args.test, others)
     print(f"\nResults in {directory}")
     for serial, results in summary.items():
         print(f"  {serial}: " + ", ".join(f"{suite} {'passed' if ok else 'FAILED'}" for suite, ok in results.items()))

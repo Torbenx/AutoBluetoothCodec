@@ -83,8 +83,9 @@ def force_stop(adb):
 def clear_data(adb):
     """Deletes the app's data and ends its process.
 
-    It also revokes the permission and clears its flags, but keeps the link
-    and observing, and doesn't stop the package (checked on API 28 and 32).
+    It also revokes the permission and clears its flags, and doesn't stop the
+    package. On API 28 and 32 it keeps the link and observing, on API 36 it
+    removes the link.
     """
     out = device_state.shell(adb, f"pm clear {PACKAGE}")
     if "Success" not in out:
