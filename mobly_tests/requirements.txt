@@ -1,1 +1,3 @@
 mobly==1.13.1
+# For the Qudelix headset backend, tools/qudelix5k.py
+hidapi

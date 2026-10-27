@@ -1,0 +1,32 @@
+# An example of testbed.yaml, the phones and headsets of the testbed. Copy it
+# to testbed.yaml next to it and fill in your own; testbed.yaml is gitignored.
+#
+# run_suite.py reads testbed.yaml and writes a Mobly config per run with the
+# phone under test and one headset, so the results of each headset are
+# reported under its own testbed name (6.3 in TestConcept.md).
+
+phones:
+  # The serial as adb devices lists it
+  - serial: 0123456789AB    # A phone without a secure lock screen
+  - serial: R0000000000     # A phone with one
+    # After a reboot the app can't run until the phone is unlocked
+    secure_lock_screen: true
+
+headsets:
+  # The key is the name to pick it with run_suite.py --headset
+  qudelix:
+    # The Qudelix-5K over USB, see tools/qudelix5k.py
+    backend: qudelix
+    address: "00:11:22:33:44:55"
+    name: Qudelix-5K
+  # The same headset switched like any other, through the phone's Bluetooth. Runs the tests
+  # without the A2DP and power switches, to check the phone backend.
+  qudelix-phone:
+    backend: phone
+    address: "00:11:22:33:44:55"
+    name: Qudelix-5K
+  # Any other paired headset, switched through the phone's Bluetooth:
+  # my-headphones:
+  #   backend: phone
+  #   address: "66:77:88:99:AA:BB"
+  #   name: My Headphones

@@ -7,7 +7,7 @@ without a name and one with a codec the app doesn't know. The last operation
 is left open, so loading the log exercises the repair that resolves it with
 OPERATION_INTERRUPTED.
 
-The script reads the event types from LogEvent.kt and fails if the sample
+The script reads the event types from LogEvent.kt, like the test harness, and fails if the sample
 misses one or breaks the operation structure (trigger, elements, resolution).
 
 Load it on a phone with a debug build installed:
@@ -20,13 +20,13 @@ Load it on a phone with a debug build installed:
 import argparse
 import json
 import pathlib
-import re
 import sys
 import time
 import uuid
 
-LOG_EVENT_KT = (pathlib.Path(__file__).resolve().parent.parent
-                / "app/src/main/java/com/tt/autobluetoothcodec/LogEvent.kt")
+# The structure check is shared with the test harness
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "mobly_tests"))
+from lib.app_log import FLOWS, check_structure, operations  # noqa: E402
 
 DAY_MS = 24 * 60 * 60 * 1000
 
@@ -210,33 +210,17 @@ def build(now_ms, utc_offset_minutes):
     return b.events
 
 
-def read_event_types():
-    """Returns {type: flow} as declared in LogEvent.kt."""
-    text = LOG_EVENT_KT.read_text(encoding="utf-8")
-    return dict(re.findall(r"^\s+([A-Z0-9_]+)\(OperationFlow\.([A-Z]+)", text, re.MULTILINE))
-
-
-def check(events, flows):
+def check(events):
     """Raises if an event type is missing or unknown, or operations are malformed."""
     used = {e["type"] for e in events}
-    missing = set(flows) - used
-    unknown = used - set(flows)
+    missing = set(FLOWS) - used
+    unknown = used - set(FLOWS)
     if missing or unknown:
         raise SystemExit(f"missing event types: {sorted(missing)}, unknown: {sorted(unknown)}")
-    open_ops = set()
-    for e in events:
-        flow, uid = flows[e["type"]], e.get("opUID")
-        if flow == "STANDALONE":
-            ok = uid is None
-        elif flow == "TRIGGER":
-            ok = uid is not None and uid not in open_ops
-            open_ops.add(uid)
-        else:
-            ok = uid in open_ops
-            if flow == "RESOLUTION":
-                open_ops.discard(uid)
-        if not ok:
-            raise SystemExit(f"event {e['seq']} ({e['type']}) breaks the operation structure")
+    problems = check_structure(events, allow_open=1)
+    if problems:
+        raise SystemExit("; ".join(problems))
+    open_ops = [op for op in operations(events) if not op.resolution]
     if len(open_ops) != 1:
         raise SystemExit(f"expected exactly one open operation, got {len(open_ops)}")
 
@@ -253,7 +237,7 @@ def main():
     sign = -1 if args.utc_offset.startswith("-") else 1
     digits = args.utc_offset.lstrip("+-")
     events = build(args.now_ms, sign * (int(digits[:2]) * 60 + int(digits[2:])))
-    check(events, read_event_types())
+    check(events)
     text = "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events)
     if args.output:
         args.output.write_text(text, encoding="utf-8", newline="\n")

@@ -1,0 +1,162 @@
+"""The app under test on one phone: its build, process, data and permission.
+
+Every function takes a Mobly AdbProxy, like device_state. Killing the app
+like the system does uses run-as, which works without root and also ends a
+process the companion service keeps bound, unlike `am kill`. It doesn't put
+the package in the stopped state, unlike `am force-stop`.
+"""
+
+import pathlib
+import re
+import subprocess
+import time
+
+from lib import device_state
+
+PACKAGE = "com.tt.autobluetoothcodec"
+SNIPPET_PACKAGE = PACKAGE + ".snippet"
+TEST_PACKAGE = PACKAGE + ".test"
+PERMISSION = "android.permission.BLUETOOTH_CONNECT"
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+APK = ROOT / "app/build/outputs/apk/debug/app-debug.apk"
+TEST_APK = ROOT / "app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+SNIPPET_APK = ROOT / "snippet/build/outputs/apk/debug/snippet-debug.apk"
+
+
+def expected_version():
+    """The version name a debug build of the working tree has, see app/build.gradle.kts."""
+    description = subprocess.run(["git", "describe", "--always", "--dirty"], cwd=ROOT,
+                                 capture_output=True, text=True, check=True).stdout.strip()
+    return "1.0-" + description
+
+
+def installed_version(adb, package=PACKAGE):
+    out = device_state.shell(adb, f"dumpsys package {package} | grep -m1 versionName= || true")
+    match = re.search(r"versionName=(\S+)", out)
+    return match.group(1) if match else None
+
+
+def install(adb, apk=APK):
+    """Installs or updates [apk], keeping the app's data, its links and its permission."""
+    adb.install(["-r", "-t", str(apk)])
+
+
+def is_stopped(adb):
+    """Whether the package is in the stopped state, in which manifest receivers get nothing."""
+    out = device_state.shell(adb, f"dumpsys package {PACKAGE} | grep -m1 -o 'stopped=[a-z]*' || true")
+    return out.strip() == "stopped=true"
+
+
+def unstop(adb):
+    """Takes the package out of the stopped state without writing to the log.
+
+    A broadcast to TestLabelReceiver without a label starts the process and
+    returns before the receiver touches the log.
+    """
+    device_state.shell(adb, f"am broadcast -f 0x20 -n {PACKAGE}/.TestLabelReceiver")
+
+
+def pid(adb):
+    out = device_state.shell(adb, f"pidof {PACKAGE} || true")
+    return int(out.split()[0]) if out.strip() else None
+
+
+def is_running(adb):
+    return pid(adb) is not None
+
+
+def kill(adb, timeout=10.0):
+    """Ends the app's process like the system does, without stopping the package."""
+    end = time.time() + timeout
+    while (process := pid(adb)) is not None:
+        device_state.shell(adb, f"run-as {PACKAGE} kill -9 {process} || true")
+        if time.time() >= end:
+            raise TimeoutError(f"the app's process {process} is still running")
+        time.sleep(0.2)
+
+
+def force_stop(adb):
+    device_state.shell(adb, f"am force-stop {PACKAGE}")
+
+
+def clear_data(adb):
+    """Deletes the app's data and ends its process.
+
+    It also revokes the permission and clears its flags, but keeps the link
+    and observing, and doesn't stop the package (checked on API 28 and 32).
+    """
+    out = device_state.shell(adb, f"pm clear {PACKAGE}")
+    if "Success" not in out:
+        raise RuntimeError(f"pm clear failed: {out}")
+
+
+def data_files(adb):
+    """The files the app stores, relative to its data directory."""
+    out = device_state.shell(adb, f"run-as {PACKAGE} sh -c 'ls -1 files/logs shared_prefs 2>/dev/null' || true")
+    return [line for line in out.splitlines() if line and not line.endswith(":")]
+
+
+def sdk(adb):
+    return int(device_state.shell(adb, "getprop ro.build.version.sdk"))
+
+
+def permission_state(adb):
+    """(granted, flags) of the Nearby devices permission, None before API 31 where it doesn't exist."""
+    if sdk(adb) < 31:
+        return None
+    out = device_state.shell(adb, f"dumpsys package {PACKAGE} | grep -m1 '{PERMISSION}: granted=' || true")
+    match = re.search(r"granted=(true|false), flags=\[\s*([^\]]*)\]", out)
+    if not match:
+        return False, set()
+    return match.group(1) == "true", {f for f in match.group(2).split("|") if f.strip()}
+
+
+def grant_permission(adb):
+    if sdk(adb) >= 31:
+        device_state.shell(adb, f"pm grant {PACKAGE} {PERMISSION}")
+
+
+def revoke_permission(adb):
+    """Revokes the permission, which kills the app's process."""
+    if sdk(adb) >= 31:
+        device_state.shell(adb, f"pm revoke {PACKAGE} {PERMISSION}")
+
+
+def launch(adb, activity=".MainActivity"):
+    device_state.shell(adb, f"am start -W -n {PACKAGE}/{activity}", timeout=30)
+
+
+def go_home(adb):
+    device_state.shell(adb, "input keyevent KEYCODE_HOME")
+
+
+def run_instrumentation(adb, runner=f"{TEST_PACKAGE}/androidx.test.runner.AndroidJUnitRunner", timeout=900):
+    """Runs the app's instrumented tests, the shared UI tests, and returns the raw output.
+
+    Not through Gradle's connectedDebugAndroidTest, which would run them on all
+    phones at once and uninstall the app afterwards, dropping its links.
+    """
+    return device_state.shell(adb, f"am instrument -w -r {runner}", timeout=timeout)
+
+
+def parse_instrumentation(output):
+    """(tests run, failures) from `am instrument -r`, and the names of the failed tests."""
+    failed = []
+    current = {}
+    for line in output.splitlines():
+        if line.startswith("INSTRUMENTATION_STATUS: class="):
+            current["class"] = line.split("=", 1)[1]
+        elif line.startswith("INSTRUMENTATION_STATUS: test="):
+            current["test"] = line.split("=", 1)[1]
+        elif line.startswith("INSTRUMENTATION_STATUS_CODE: "):
+            code = int(line.split(": ", 1)[1])
+            if code in (-1, -2):
+                failed.append(f"{current.get('class')}#{current.get('test')}")
+    ran = re.search(r"Tests run: (\d+),\s+Failures: (\d+)", output)
+    ok = re.search(r"^OK \((\d+) tests?\)", output, re.MULTILINE)
+    if ok:
+        return int(ok.group(1)), 0, failed
+    if ran:
+        return int(ran.group(1)), int(ran.group(2)), failed
+    return 0, len(failed) or 1, failed or ["the instrumentation didn't report results"]
