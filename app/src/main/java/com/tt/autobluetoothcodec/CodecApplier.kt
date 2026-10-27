@@ -1,16 +1,14 @@
 package com.tt.autobluetoothcodec
 
 import android.Manifest
-import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.RequiresPermission
+import androidx.annotation.VisibleForTesting
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,9 +23,12 @@ import kotlinx.coroutines.flow.asStateFlow
  * resolves it, unless the operation is handed back to its onSecurityException callback.
  *
  * The profile proxy is opened by the first request and kept until Bluetooth turns off, keeping it
- * open only holds a binder reference.
+ * open only holds a binder reference. The applier reaches the profile through [A2dpAccess].
  */
-class CodecApplier private constructor(private val context: Context) : BluetoothProfile.ServiceListener {
+class CodecApplier @VisibleForTesting internal constructor(
+    private val context: Context,
+    private val a2dp: A2dpAccess
+) : A2dpAccess.Listener {
     companion object {
         private const val TAG = "CodecApplier"
         private const val VERIFY_DELAY_MILLIS: Long = 500
@@ -37,14 +38,15 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
 
         fun get(context: Context): CodecApplier {
             // A BroadcastReceiver's context isn't allowed to bind services, which the profile proxy does
-            return instance ?: CodecApplier(context.applicationContext).also { instance = it }
+            val appContext = context.applicationContext
+            return instance ?: CodecApplier(appContext, SystemA2dpAccess(appContext)).also { instance = it }
         }
     }
 
     private val handler = Handler(Looper.getMainLooper())
     private val processRunnable = Runnable { processRequests() }
 
-    private var a2dpProfile: BluetoothA2dp? = null
+    private var profileConnected = false
     private var profileRequested = false
     private val requests = ArrayList<Request>()
 
@@ -75,7 +77,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
             return
         }
         // While Bluetooth is off the profile proxy wouldn't connect until it's turned on
-        if (!isBluetoothEnabled()) {
+        if (!a2dp.isBluetoothEnabled) {
             reject(operation, onDone, EventType.PROFILE_UNAVAILABLE)
             return
         }
@@ -95,7 +97,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
                 message = "superseded by operation ${operation.uid}")
             superseded.onDone?.invoke(EventType.SUPERSEDED)
         }
-        if (a2dpProfile != null)
+        if (profileConnected)
             processRequests()
         else
             connectProfile()
@@ -116,11 +118,6 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
     private fun reject(operation: EventLog.Operation, onDone: ((EventType) -> Unit)?, resolution: EventType, message: String? = null) {
         operation.resolve(resolution, message = message)
         onDone?.invoke(resolution)
-    }
-
-    private fun isBluetoothEnabled(): Boolean {
-        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        return adapter?.isEnabled ?: false
     }
 
     /** Removes [request] and resolves its operation with [resolution]. */
@@ -146,8 +143,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
     private fun connectProfile() {
         if (profileRequested)
             return
-        val adapter = (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        profileRequested = adapter?.getProfileProxy(context, this, BluetoothProfile.A2DP) ?: false
+        profileRequested = a2dp.connect(this)
         if (!profileRequested) {
             for (request in requests.toList())
                 if (request in requests)
@@ -155,23 +151,19 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
         }
     }
 
-    private fun closeProfileProxy(profile: BluetoothA2dp) {
-        val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        manager.adapter?.closeProfileProxy(BluetoothProfile.A2DP, profile)
-    }
-
-    override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
-        a2dpProfile = proxy as BluetoothA2dp
+    override fun onConnected() {
+        profileConnected = true
         processRequests()
     }
 
-    override fun onServiceDisconnected(profile: Int) {
+    override fun onDisconnected() {
         // Closing the proxy reports the disconnect again
-        val proxy = a2dpProfile ?: return
-        a2dpProfile = null
+        if (!profileConnected)
+            return
+        profileConnected = false
         // Requested again by the next request, rather than relying on the framework to reconnect it
         profileRequested = false
-        closeProfileProxy(proxy)
+        a2dp.close()
         handler.removeCallbacks(processRunnable)
         for (request in requests.toList())
             if (request in requests)
@@ -181,14 +173,15 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun processRequests() {
         handler.removeCallbacks(processRunnable)
-        val profile = a2dpProfile ?: return
+        if (!profileConnected)
+            return
         val now = SystemClock.uptimeMillis()
         for (request in requests.toList()) {
             // The callback of an earlier request may have changed the requests
             if (request !in requests || now - request.lastApplyAttempt < VERIFY_DELAY_MILLIS)
                 continue
             try {
-                process(profile, request, now)
+                process(request, now)
             } catch (e: SecurityException) {
                 Log.d(TAG, "Bluetooth refused codec access", e)
                 val onSecurityException = request.onSecurityException
@@ -204,7 +197,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
                 finish(request, EventType.ERROR, attempt = request.attemptCount, message = e.toString())
             }
         }
-        if (a2dpProfile != null && requests.isNotEmpty()) {
+        if (profileConnected && requests.isNotEmpty()) {
             val nextAttempt = requests.minOf { it.lastApplyAttempt } + VERIFY_DELAY_MILLIS
             handler.postAtTime(processRunnable, nextAttempt)
         }
@@ -212,10 +205,10 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
 
     /** Verifies the previous attempt of [request] and makes the next one, or finishes the request. */
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private fun process(profile: BluetoothA2dp, request: Request, now: Long) {
+    private fun process(request: Request, now: Long) {
         val operation = request.operation
         val target = LogCodecConfig.of(request.target)
-        if (profile.getConnectionState(request.device) != BluetoothProfile.STATE_CONNECTED) {
+        if (!a2dp.isConnected(request.device)) {
             finish(request, EventType.NOT_CONNECTED, attempt = request.attemptCount)
             return
         }
@@ -227,7 +220,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
 
         var actual: LogCodecConfig? = null
         if (request.attemptCount > 0) {
-            actual = A2dpProfileUtil.getCurrentCodecConfig(profile, request.device)?.let { LogCodecConfig.of(it) }
+            actual = a2dp.getCodec(request.device)?.let { LogCodecConfig.of(it) }
             operation.log(EventType.VALIDATE_CODEC_CONFIG, config = target, actual = actual, attempt = request.attemptCount)
             if (actual?.own?.let { request.target.isFulfilledBy(it) } == true) {
                 finish(request, EventType.CODEC_VERIFIED, actual = actual, attempt = request.attemptCount)
@@ -242,7 +235,7 @@ class CodecApplier private constructor(private val context: Context) : Bluetooth
 
         request.attemptCount += 1
         operation.log(EventType.SET_CODEC_CONFIG, config = target, attempt = request.attemptCount)
-        A2dpProfileUtil.setCodecConfig(profile, request.device, request.target.toAndroid())
+        a2dp.setCodec(request.device, request.target.toAndroid())
         request.lastApplyAttempt = now
     }
 
