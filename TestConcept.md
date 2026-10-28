@@ -924,6 +924,12 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   D18 the service counts it present while any source sees it: a reconnect is
   one appearance (C1, C2). Without A2DP, BLE is the only source, and its gaps
   remain.
+- In one run of E3 on the S24 the app set the preferred codec 13 ms after
+  A2DP connected, while the S24 was still making the headset its active
+  device. The stack reported SBC, then switched back to LDAC 96 kHz by itself
+  6 ms later. The app's check 500 ms after the change still read SBC and
+  resolved `CODEC_VERIFIED`, while LDAC stayed active. The next two runs of E3
+  and every other reconnect on the S24 applied the codec, see D19.
 - Play Protect asked again for the snippet APK of a new build. The install
   timeout stopped the run with its message, and declining the upload let the
   install finish. Since then its option to send unknown apps is off on the
@@ -997,3 +1003,22 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   connecting can't be reproduced on demand, the gaps come at random times, so
   the component tests (K5) cover it; C1 and C2 check one appearance per
   reconnect on API 36.
+
+### Open
+
+**D19. How should the applier handle the S24 changing the codec back right
+after A2DP connects?** In one of four runs of E3 the stack switched back to
+its own codec 6 ms after the app's change, and the status the app reads
+lagged behind, so the app verified a codec that wasn't active (section 12).
+- (a) Requests started by a connect wait until the device is the active A2DP
+  device, plus a short delay, before the first attempt.
+- (b) A request is verified only when two reads 500 ms apart both match, so a
+  change back within that time is applied again. Every request takes 500 ms
+  longer.
+- (c) After verifying, the applier watches `ACTION_CODEC_CONFIG_CHANGED` for a
+  few seconds and applies the codec again if it changes.
+
+*Recommendation:* (b): it doesn't depend on how a phone announces its active
+device, and also covers changes back after a choice on the main screen. It
+can't be tested on demand on the phones, since the race is rare; component
+tests with the fake can make the stack change back.
