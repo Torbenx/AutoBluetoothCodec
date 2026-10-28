@@ -38,7 +38,7 @@ import yaml
 from mobly import config_parser
 from mobly import test_runner
 from mobly.controllers import android_device
-from mobly.controllers.android_device_lib.adb import AdbProxy
+from mobly.controllers.android_device_lib.adb import AdbProxy, AdbTimeoutError
 
 from lib import app
 from lib import device_state
@@ -48,6 +48,8 @@ from lib.device_test import DeviceTest
 
 HERE = pathlib.Path(__file__).resolve().parent
 SUITES = ["ui", "journeys", "bt_logic", "cold_start"]
+# The module in tests/ of each Mobly suite
+MODULES = {"journeys": "journey_test", "bt_logic": "bt_logic_test", "cold_start": "cold_start_test", "smoke": "smoke_test"}
 # Checks that the baseline is stable, run on its own with --suite smoke
 SMOKE = "smoke"
 
@@ -68,7 +70,10 @@ def install(adb):
     for apk in (app.APK, app.TEST_APK, app.SNIPPET_APK):
         if not apk.exists():
             sys.exit(f"{apk} is missing, build first (--build)")
-        app.install(adb, apk)
+        try:
+            app.install(adb, apk)
+        except AdbTimeoutError:
+            sys.exit(f"installing {apk.name} timed out, check the phone for a dialog like Play Protect's")
     expected = app.expected_version()
     installed = app.installed_version(adb)
     if installed != expected:
@@ -94,7 +99,7 @@ def mobly_config(directory, serial, phone, headset_name, headset):
 
 
 def test_classes(suite):
-    module = importlib.import_module(f"tests.{suite}_test")
+    module = importlib.import_module(f"tests.{MODULES[suite]}")
     # Only the classes with tests, not the base classes a module defines for them
     return [cls for _, cls in inspect.getmembers(module, inspect.isclass)
             if issubclass(cls, DeviceTest) and cls.__module__ == module.__name__

@@ -38,9 +38,16 @@ def installed_version(adb, package=PACKAGE):
     return match.group(1) if match else None
 
 
+INSTALL_TIMEOUT = 180
+
+
 def install(adb, apk=APK):
-    """Installs or updates [apk], keeping the app's data, its links and its permission."""
-    adb.install(["-r", "-t", str(apk)])
+    """Installs or updates [apk], keeping the app's data, its links and its permission.
+
+    Raises AdbTimeoutError when a dialog on the phone holds the install, like
+    Play Protect's offer to scan an unknown app, instead of waiting forever.
+    """
+    adb.install(["-r", "-t", str(apk)], timeout=INSTALL_TIMEOUT)
 
 
 def is_stopped(adb):

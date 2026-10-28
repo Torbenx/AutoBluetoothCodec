@@ -45,12 +45,15 @@ class DeviceTest(base_test.BaseTestClass):
                      f"the {self.headset.backend} headset has no {capability}")
 
     def on_fail(self, record):
-        if self._artifacts is None:
+        if getattr(self, "_artifacts", None) is None:
             self.collect_artifacts()
 
     def on_pass(self, record):
-        if self._artifacts is not None:
+        if getattr(self, "_artifacts", None) is not None:
             shutil.rmtree(self._artifacts, ignore_errors=True)
+
+    def on_skip(self, record):
+        self.on_pass(record)
 
     def collect_artifacts(self):
         """Saves what helps to understand a failure: log, Logcat, dumps, screen, headset."""

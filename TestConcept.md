@@ -783,8 +783,9 @@ needs the ones before it unless it says otherwise.
    B8 pass on all three phones.
 10. **L4 P1** (done): C1, C2 and C3 pass on every phone they apply to; C3
     records what happens per API level.
-11. **L5 P1**: `snippet-uiautomator`, `screens.py`; E2, E3, E6. With this step the core promise is
-    covered end to end on every phone.
+11. **L5 P1** (done): `snippet-uiautomator`, `screens.py`; E2, E3, E6 pass on
+    every phone they apply to. With this step the core promise is covered end
+    to end on every phone.
 12. **P2 of all levels**, including C9, C13 and the phone backend of the
     `Headset` controller. Then every case of the manual test records is
     automated, and they're deleted (D10).
@@ -888,6 +889,12 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - `TestLabelReceiver` returns before touching the log when the broadcast has
   no label, but the broadcast still starts the process. That's what takes the
   package out of the stopped state without writing to the log.
+- The journeys pass on all three phones. The system's link dialog appears on
+  the API 32 Pixel and the S24, in English and German; `screens.py` accepts
+  both.
+- Installing the debug test APK on the S24 blocked on a Play Protect dialog
+  asking to send the unknown app for a scan, until "Nicht senden" was tapped.
+  `adb install` has no timeout, so the run hung instead of failing.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
