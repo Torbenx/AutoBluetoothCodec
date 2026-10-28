@@ -581,7 +581,9 @@ dump, and the headset's status.
 
 Prepared once per phone, outside the suite: developer options and USB
 debugging on, the headsets paired with the phone; the connect fixture
-connects them (6.6). Saving and restoring a phone's own app data,
+connects them (6.6). On phones with Google Play Protect, its option to send
+unknown apps to Google for a scan is off: otherwise installing a new build
+waits on its dialog until the install times out. It's off on the S24. Saving and restoring a phone's own app data,
 like the S24's, is outside the suite too (D7).
 
 1. Start `testbed_session.py` in one terminal.
@@ -922,7 +924,8 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   the headset and cancels a running request, see D18.
 - Play Protect asked again for the snippet APK of a new build. The install
   timeout stopped the run with its message, and declining the upload let the
-  install finish.
+  install finish. Since then its option to send unknown apps is off on the
+  S24 (6.9).
 - The S24's Bluetooth settings show the headset's name between invisible
   left-to-right marks, `‎Qudelix-5K‎`.
 - On API 32 the system sometimes reports a device that stays on without A2DP
