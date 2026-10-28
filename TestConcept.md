@@ -65,13 +65,14 @@ lock screen is a capability:
 | --- | --- | --- | --- |
 | Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
 | No secure lock screen | `testbed.yaml` | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
+| End the app's process like the system | `run-as … kill` on API 28 and 36; API 32 needs root, `run-as` can't see the process there | C1, C3, C4 | all |
 | LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
 
 ### Code paths per API level
 
 | Path | API 28 Pixel | API 32 Pixel | API 33 | API 34–35 | API 36 S24 | 31+ without companion feature |
 | --- | --- | --- | --- | --- | --- | --- |
-| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService`, observed by address | by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
+| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService` when the device appears, observed by address; `A2dpConnectReceiver` when A2DP connects later | `CodecCompanionService`, by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
 | Codec classes | reflection | reflection | public | public | public | – |
 | Runtime permission | – | yes | yes | yes | yes | yes |
 | Association needed to change the codec | no | no | no | yes | yes | – |
@@ -148,9 +149,14 @@ Pitfalls the harness has to handle:
   get nothing until a component of the app is started again. A broadcast to
   `TestLabelReceiver` without a label does that without writing to the log.
 - A process killed by the system is simulated with `run-as … kill -9`, which
-  works without root and doesn't stop the package. `am kill` doesn't end a
-  process the companion service keeps bound. On the S24 the system binds the
-  service again within about 3 s and delivers `onDeviceAppeared` again.
+  works without root on API 28 and 36 and doesn't stop the package; on API 32
+  SELinux keeps `run-as` from seeing the process, so it takes `su`. `am kill`
+  doesn't end a process the companion service keeps bound. On the S24 the
+  system binds the service again within about 3 s and delivers
+  `onDeviceAppeared` again; on the API 32 Pixel it doesn't (C3).
+- Mobly calls `on_fail` after `teardown_test`, when the restore has already
+  reset the app, so `BaselineTest` collects the artifacts in its teardown and
+  drops them again for tests that passed.
 - The phones' clocks differ (the API 28 Pixel is in 2019). Events are ordered
   by `seq` and labels, never compared with the host's time.
 - `dumpsys bluetooth_manager` has several per-device tables, like the AVRCP
@@ -775,7 +781,8 @@ needs the ones before it unless it says otherwise.
    tests on every phone; all 38 pass on all three.
 9. **Snippet module and L3 P1** (done): the RPCs; B1, B2 (codec types), B3,
    B8 pass on all three phones.
-10. **L4 P1**: C1, C2, C3.
+10. **L4 P1** (done): C1, C2 and C3 pass on every phone they apply to; C3
+    records what happens per API level.
 11. **L5 P1**: `snippet-uiautomator`, `screens.py`; E2, E3, E6. With this step the core promise is
     covered end to end on every phone.
 12. **P2 of all levels**, including C9, C13 and the phone backend of the
@@ -834,6 +841,22 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   bitrate itself (codecSpecific1 133) when the app leaves it at the default.
 - After a `cycle`, the Qudelix keeps paging the phone it served last for up to
   a minute and refuses connections from other phones meanwhile.
+- Bug found by C1 on the API 32 Pixel, and fixed: the system binds
+  `CodecCompanionService` only for `onDeviceAppeared`, and the process is gone
+  within 3 s. The device usually appears before A2DP connects, so nobody
+  applied the preferred codec when A2DP connected. The S24 keeps the service
+  bound while the device is present. The manifest receiver now stays enabled
+  on API 31 and 32, like on API 28; whether 33 to 35 keep the binding like 36
+  is assumed, no phone of the testbed has them.
+- C3, recorded as today's behaviour (D8): the device is present without A2DP,
+  the app's process is killed, then A2DP connects. On the API 32 Pixel the
+  receiver applies the preferred codec. On the S24 the system doesn't start
+  the process again, the receiver is disabled there, and the codec is not
+  applied. That's the risk section 1 names; see D17.
+- When observing starts while the device's link is already up, the S24
+  reports no appearance; there's no change to report. C3 switches the headset
+  off and back on without A2DP to get one. BLE sightings on the API 32 Pixel
+  took from seconds to over a minute.
 - `pm clear` on API 36 also removes the app's companion links.
 - On the S24, turning Bluetooth on over adb doesn't reconnect the Qudelix,
   even right after it was connected. A `cycle` does, if the S24 was the last
@@ -922,3 +945,12 @@ reconnects the phone the Qudelix served last (6.6).
 - (c) The S24 always runs first, which still needs (b) after a Pixel's run.
 
 *Recommendation:* (a).
+
+**D17. Should the preferred codec be applied when the process was killed
+while the device was present?** On API 36 the system doesn't start the app
+again when A2DP connects later (C3), so the codec stays as the phone picked
+it until the device reconnects. Keeping the manifest receiver enabled on every
+API level would cover it, at the cost of a second operation that resolves
+`ALREADY_PENDING` when the service is alive too. Recorded as today's
+behaviour for now (D8).
+

@@ -58,7 +58,8 @@ class Headset:
     def power_off(self):
         raise NotImplementedError(f"{self.backend} headsets can't be switched off")
 
-    def power_on(self):
+    def power_on(self, a2dp=True):
+        """Switches the headset on, with A2DP or with only its link and BLE."""
         raise NotImplementedError(f"{self.backend} headsets can't be switched on")
 
     def is_normal(self):
@@ -119,8 +120,9 @@ class QudelixHeadset(Headset):
     def power_off(self):
         self._set("bt-off")
 
-    def power_on(self):
-        self._set("normal")
+    def power_on(self, a2dp=True):
+        # Leaving bt-off reboots the 5K into the new mode
+        self._set("normal" if a2dp else "no-a2dp")
 
     def is_normal(self):
         return self.status() == "normal"

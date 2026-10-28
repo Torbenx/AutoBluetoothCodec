@@ -5,6 +5,7 @@ and one Headset, see testbed.yaml.
 """
 
 import pathlib
+import shutil
 
 from mobly import asserts
 from mobly import base_test
@@ -32,6 +33,7 @@ class DeviceTest(base_test.BaseTestClass):
 
     def setup_test(self):
         self._logcat_since = device_state.shell(self.adb, "date +'%m-%d %H:%M:%S.000'")
+        self._artifacts = None
 
     def require(self, condition, reason):
         """Skips the test unless the phone or headset can do what it needs."""
@@ -43,10 +45,17 @@ class DeviceTest(base_test.BaseTestClass):
                      f"the {self.headset.backend} headset has no {capability}")
 
     def on_fail(self, record):
-        self.collect_artifacts(pathlib.Path(self.current_test_info.output_path))
+        if self._artifacts is None:
+            self.collect_artifacts()
 
-    def collect_artifacts(self, directory):
+    def on_pass(self, record):
+        if self._artifacts is not None:
+            shutil.rmtree(self._artifacts, ignore_errors=True)
+
+    def collect_artifacts(self):
         """Saves what helps to understand a failure: log, Logcat, dumps, screen, headset."""
+        directory = pathlib.Path(self.current_test_info.output_path) / "artifacts"
+        self._artifacts = directory
         directory.mkdir(parents=True, exist_ok=True)
         steps = {
             "event_log.jsonl": lambda: device_state.shell(
@@ -80,6 +89,8 @@ class BaselineTest(DeviceTest):
     """
 
     def setup_class(self):
+        self.leaks = []
+        self._previous_test = None
         super().setup_class()
         installed, expected = app.installed_version(self.adb), app.expected_version()
         if installed != expected:
@@ -94,8 +105,6 @@ class BaselineTest(DeviceTest):
         problems = self.baseline.check()
         if problems:
             asserts.abort_class(f"the baseline isn't stable after recording the codec: {problems}")
-        self.leaks = []
-        self._previous_test = None
 
     def setup_test(self):
         super().setup_test()
@@ -109,6 +118,8 @@ class BaselineTest(DeviceTest):
 
     def teardown_test(self):
         self._previous_test = self.current_test_info.name
+        # Mobly only calls on_fail after the teardown, when the restore has reset the app
+        self.collect_artifacts()
         try:
             remaining = self.baseline.restore()
             if remaining:

@@ -1,9 +1,10 @@
 """The app under test on one phone: its build, process, data and permission.
 
 Every function takes a Mobly AdbProxy, like device_state. Killing the app
-like the system does uses run-as, which works without root and also ends a
-process the companion service keeps bound, unlike `am kill`. It doesn't put
-the package in the stopped state, unlike `am force-stop`.
+like the system does uses run-as, or su where run-as can't see the process,
+which also ends a process the companion service keeps bound, unlike `am
+kill`. It doesn't put the package in the stopped state, unlike `am
+force-stop`.
 """
 
 import pathlib
@@ -67,10 +68,18 @@ def is_running(adb):
 
 
 def kill(adb, timeout=10.0):
-    """Ends the app's process like the system does, without stopping the package."""
+    """Ends the app's process like the system does, without stopping the package.
+
+    run-as works without root on the S24. On the API 32 Pixel it can't see the
+    app's process ("unknown pid"), so it needs root there.
+    """
     end = time.time() + timeout
     while (process := pid(adb)) is not None:
-        device_state.shell(adb, f"run-as {PACKAGE} kill -9 {process} || true")
+        out = device_state.shell(adb, f"run-as {PACKAGE} kill -9 {process} 2>&1 || true")
+        if "unknown pid" in out or "denied" in out.lower():
+            if not device_state.has_su(adb):
+                raise RuntimeError(f"can't end the app's process without root: {out.strip()}")
+            device_state.shell(adb, f"su -c 'kill -9 {process}' || true")
         if time.time() >= end:
             raise TimeoutError(f"the app's process {process} is still running")
         time.sleep(0.2)
