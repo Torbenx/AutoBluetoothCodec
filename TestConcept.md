@@ -5,9 +5,9 @@ covers, which information and control channels they use, what the harness
 needs, and in which order it's built. The decisions behind it, D1 to D15, are
 listed in [section 13](#13-decisions) and referenced where they matter.
 
-The two manual test records, [codec-applier-tests.md](tools/codec-applier-tests.md)
-and [log-ui-tests.md](tools/log-ui-tests.md), inform the automated tests and
-are deleted once their cases are automated (D10), see
+Two manual test records, `tools/codec-applier-tests.md` and
+`tools/log-ui-tests.md`, informed the automated tests. They were deleted once
+their cases were automated (D10) and remain in the Git history, see
 [section 11](#11-existing-manual-tests).
 
 ## 1. What needs testing
@@ -284,12 +284,12 @@ unless a test says otherwise.
 | B4 | A target outside the capabilities resolves `MAX_ATTEMPTS` after 5 attempts and leaves the codec as it was | all | | P2 |
 | B5 | `ALREADY_PENDING` and `SUPERSEDED` with the real stack's timing (manual 1.4, 1.5) | all | | P2 |
 | B6 | A disconnected device resolves `NOT_CONNECTED` | all | A2DP switch | P2 |
-| B7 | The phone's Bluetooth off resolves `PROFILE_UNAVAILABLE`; off during a request `PROFILE_DISCONNECTED`; back on, the next request opens a new proxy and verifies (manual 2.3) | all | | P2 |
+| B7 | The phone's Bluetooth off resolves `PROFILE_UNAVAILABLE`; off during a request `PROFILE_DISCONNECTED`, or `NOT_CONNECTED` when the device's connection goes before the profile, which the S24 does in some runs; back on, the next request opens a new proxy and verifies (manual 2.3) | all | | P2 |
 | B8 | Links, with the main screen open. Without a link: up to 33 reading and changing work; on 34–35 changing resolves `NO_ASSOCIATION`; on 36 the codec is also unreadable, and the screen logs `READ_FAILED` once. With a link everything works | all | | P1 |
-| B9 | Observing: on with a preferred codec, off when it's deleted, and after clearing app data the next start turns it off (whether the link stays is recorded, 6.7) | 31+ | | P2 |
+| B9 | Observing: on with a preferred codec, off when it's deleted, and after clearing app data the next start turns it off (whether the link stays is recorded, 6.7). API 31–32 show observing nowhere, C1 and C3 depend on it there | 33+ | | P2 |
 | B10 | A device disappearing during a request resolves `CANCELLED` | 31+ | power switch | P3 |
 | B11 | A codec set bypassing the applier, with the main screen open, is logged once as `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE`; the app's own changes never are (manual 2.2) | all | | P2 |
-| B12 | A request while the service or receiver applies the preferred codec on connect supersedes it, and the requested codec wins | all | | P2 |
+| B12 | A request while the service or receiver applies the preferred codec on connect supersedes it, and the requested codec wins. The preferred codec is one the headset doesn't offer, which keeps the background operation open for its 5 attempts; B7 and C4 use the same trick | all | | P2 |
 
 ### L4 Background and cold start tests
 
@@ -304,14 +304,14 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
 | C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
 | C5 | Permission revoked, the device connects: `NO_PERMISSION` is logged, no crash | 31+ | | P2 |
-| C6 | No preferred codec: the codec isn't touched, from 31 the app isn't even started | all | | P2 |
+| C6 | No preferred codec: the codec isn't touched, from 33 the app isn't even started (up to 32 the manifest receiver starts it and returns) | all | | P2 |
 | C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
 | C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
 | C9 | Never launched (fresh install) and force-stopped, then the device connects: records what happens. Characterization (D8) | all | | P2 |
 | C10 | The phone's Bluetooth turned off and on while the app is dead, then the device connects: applied | all | | P3 |
 | C11 | 20 reconnects in a row: every one verified, time to verified recorded | all | | P3 |
 | C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
-| C13 | Presence without A2DP: with a preferred codec and A2DP down, every time the device appears (phone Bluetooth on, headset back on) one operation resolves `NOT_CONNECTED` and nothing is applied; a device that stays present logs nothing more over 5 minutes. Characterization (D8) | 31+ | A2DP switch, power switch | P2 |
+| C13 | Presence without A2DP: with a preferred codec and A2DP down, every time the device appears (phone Bluetooth on, headset back on) one operation resolves `NOT_CONNECTED`, or `PROFILE_UNAVAILABLE` when the S24 sees it over BLE before its Bluetooth is back on, and nothing is applied. Whether a device that stays on is reported present for 5 minutes is recorded per API level: on 32 the system sometimes reports it gone and back within seconds. Characterization (D8) | 31+ | A2DP switch, power switch | P2 |
 
 ### L5 Journeys
 
@@ -323,8 +323,8 @@ check that the parts work together, not every detail on the way.
 | E1 | First start: grant the permission in the system dialog, the card shows the codec `dumpsys` reports. Denying twice shows the settings hint | 31+ | P2 |
 | E2 | Choose codecs with the chips: `dumpsys`, the card and the log agree (manual 1.1) | all | P1 |
 | E3 | Save as preferred; from 31 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
-| E4 | A codec change in the developer options shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2) | all | P2 |
-| E5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone | all | P2 |
+| E4 | A codec change by another app shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2). The snippet's `setCodecDirectly` makes the change, the same call the developer options make: their screens differ too much between the phones, and the API 28 Pixel doesn't open them from their intent | all | P2 |
+| E5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone (debug builds keep it for Unlink where the device is linked) | all | P2 |
 | E6 | An unlinked device asks to be linked (on 36 because its codec is unreadable, on 34–35 once it has a preferred codec); Allow and the dialog make its codec appear and changeable | 34+ | P1 |
 | E7 | Rotating while a codec is applied: no crash, verified (manual 1.6) | all | P2 |
 | E8 | The log screen shows a real reconnect with its attempts; the anonymised export contains no addresses or names (log 2.5) | all | P2 |
@@ -786,8 +786,10 @@ needs the ones before it unless it says otherwise.
 11. **L5 P1** (done): `snippet-uiautomator`, `screens.py`; E2, E3, E6 pass on
     every phone they apply to. With this step the core promise is covered end
     to end on every phone.
-12. **P2 of all levels**, including C9, C13 and the phone backend of the
-    `Headset` controller. Then every case of the manual test records is
+12. **P2 of all levels** (done), including C9, C13 and the phone backend of
+    the `Headset` controller, checked with the Qudelix as `qudelix-phone` on
+    the API 28 Pixel. Every P2 test passes, or is skipped for its API level or
+    headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
 13. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
     test once R8 is enabled.
@@ -806,15 +808,18 @@ needs the ones before it unless it says otherwise.
 | 2.2 Developer options change | B11, E4 |
 | 2.3 Bluetooth off and on | B7, K3 |
 | Not covered: linking before applying, refusal hand-back, receiver deadline, `PROFILE_UNAVAILABLE` | E6, K1, K4, B7 |
+| Not covered: the receiver or the service superseded by a choice on the main screen | B12 |
+| Not covered: toasts for failed changes | Not automated |
 | Log UI 1.1–1.6 smoke tests | V9, V11, E8 |
 | 2.1 Load the sample log | K7 |
 | 2.2–2.4 Entries | V8, V9 |
 | 2.5 Anonymised export | `LogExportTest`, E8 |
 | Not covered: clearing, live updates | V11, V10 |
+| Not covered: screen sizes, landscape, font sizes, dark mode | V12 (P3) |
 
-The records inform the automated tests and are deleted once all their cases
-are automated (D10), which is after step 12 of the implementation order. E7 is
-P2 for that reason. What stays manual: looking at the screenshots.
+The records were deleted with step 12 of the implementation order, once all
+their cases were automated (D10). What stays manual: looking at the
+screenshots, and the toasts, which no test checks.
 
 ## 12. Observations from the testbed
 
@@ -895,6 +900,41 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - Installing the debug test APK on the S24 blocked on a Play Protect dialog
   asking to send the unknown app for a scan, until "Nicht senden" was tapped.
   `adb install` has no timeout, so the run hung instead of failing.
+- Every rate, size and LDAC bitrate the Qudelix offers is verified on the
+  first attempt on both Pixels (B2). API 28 reports the LDAC bitrate as the
+  10 to 13 the app set, not 1000 to 1003.
+- Turning Bluetooth off during a request resolves it `PROFILE_DISCONNECTED`
+  on both Pixels, after 3 or 4 attempts (B7). On the S24 it resolved
+  `NOT_CONNECTED` in one run and `PROFILE_DISCONNECTED` in the next.
+- A force-stopped app doesn't apply the preferred codec when the device
+  connects on API 28 and 32 (C9): the stopped package gets no broadcast, and
+  on 32 the companion device manager doesn't start it either. On the S24 the
+  companion device manager binds the service anyway, the codec is applied and
+  the package leaves the stopped state. A fresh install over adb isn't in the
+  stopped state on the S24.
+- The S24 reports the headset's presence from two sources: it appears twice, a
+  second apart, when the headset comes on, and disappears twice. Without A2DP
+  it also reports the headset gone and back every minute or two (C13). The
+  service keeps one set of present devices, so the first disappearance removes
+  the headset and cancels a running request, see D18.
+- Play Protect asked again for the snippet APK of a new build. The install
+  timeout stopped the run with its message, and declining the upload let the
+  install finish.
+- The S24's Bluetooth settings show the headset's name between invisible
+  left-to-right marks, `‎Qudelix-5K‎`.
+- On API 32 the system sometimes reports a device that stays on without A2DP
+  as gone and back within seconds (C13). The app logs each appearance as one
+  operation that resolves `NOT_CONNECTED`.
+- Compose's dropdown menus are popups, outside the semantics of the screen
+  that exposes test tags as resource ids, so UiAutomator didn't find their
+  items until the menus set it themselves.
+- Unloading the snippet ends the app's process. On API 32 saving a preferred
+  codec makes the device appear at once and the service apply the codec, so a
+  test waits for that operation before unloading, or the log check reports it
+  interrupted.
+- The Qudelix once didn't answer its mode query for about 3 minutes. The
+  backend retries it for 20 s; beyond that the class is aborted, like any
+  baseline that can't be checked, instead of every test failing on it.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
@@ -960,4 +1000,19 @@ it until the device reconnects. Keeping the manifest receiver enabled on every
 API level would cover it, at the cost of a second operation that resolves
 `ALREADY_PENDING` when the service is alive too. Recorded as today's
 behaviour for now (D8).
+
+**D18. Should the service track presence per source on API 36?** The S24
+reports the headset from two sources and reports it gone and back while it's
+on (section 12). `CodecCompanionService` keeps one set of present addresses:
+the first `onDeviceDisappeared` removes the device and cancels its request,
+even while the other source still reports it. If A2DP connects in such a gap,
+the preferred codec isn't applied, and a request running at the time is
+cancelled. Not reproduced yet; C13 shows the gaps without A2DP.
+- (a) Use `onDevicePresenceEvent` on API 36 and count a device present while
+  any source reports it. A test with A2DP connecting during a gap would show
+  the difference.
+- (b) Keep it; a later reconnect applies the codec.
+
+*Recommendation:* (a), after a test that reproduces the gap with A2DP
+connecting.
 
