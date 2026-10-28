@@ -8,8 +8,8 @@
     <!-- Since API 31 the system binds CodecCompanionService while an associated device is present -->
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE"/>
 
-    <!-- Since API 31 needed to apply the preferred codec automatically, since API 34 also to change
-         the codec. Without it A2dpConnectReceiver applies the preferred codec, like before API 31. -->
+    <!-- Since API 31 needed to apply the preferred codec when a device appears, since API 34 also to
+         change the codec. Without it only A2dpConnectReceiver applies the preferred codec. -->
     <uses-feature android:name="android.software.companion_device_setup" android:required="false"/>
 
     <application
@@ -53,10 +53,9 @@
                 <action android:name="android.companion.CompanionDeviceService"/>
             </intent-filter>
         </service>
-        <!-- Disabled since API 33 by values-v33, CompanionPresence enables it again if needed -->
+        <!-- Enabled on every API level, it also covers A2DP connecting while CodecCompanionService doesn't run -->
         <receiver
             android:name=".A2dpConnectReceiver"
-            android:enabled="@bool/legacy_receiver_enabled"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED"/>

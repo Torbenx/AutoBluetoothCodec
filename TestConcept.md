@@ -240,7 +240,7 @@ levels and fakes that a phone can't provide.
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
 | K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3) | P1 |
-| K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, receiver enabled state, `isAssociationRequired(ForAutoApply)`, address case | P1 |
+| K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
 | K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
 
@@ -299,12 +299,12 @@ does, never launched, force-stopped, after a reboot or after an update.
 
 | ID | Test | Runs on | Needs | Prio |
 | --- | --- | --- | --- | --- |
-| C1 | App process killed, the headset reconnects: the preferred codec is applied, by the receiver up to 30 and the service from 31 | all | | P1 |
+| C1 | App process killed, the headset reconnects: the preferred codec is applied, by the service from 31 and by the manifest receiver on every level (D17) | all | | P1 |
 | C2 | The same with the app in the foreground and in the background but alive (manual 2.1) | all | | P1 |
 | C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
 | C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
 | C5 | Permission revoked, the device connects: `NO_PERMISSION` is logged, no crash | 31+ | | P2 |
-| C6 | No preferred codec: the codec isn't touched, from 33 the app isn't even started (up to 32 the manifest receiver starts it and returns) | all | | P2 |
+| C6 | No preferred codec: the codec isn't touched and nothing is logged; the manifest receiver starts the process and returns | all | | P2 |
 | C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
 | C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
 | C9 | Never launched (fresh install) and force-stopped, then the device connects: records what happens. Characterization (D8) | all | | P2 |
@@ -856,14 +856,15 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   `CodecCompanionService` only for `onDeviceAppeared`, and the process is gone
   within 3 s. The device usually appears before A2DP connects, so nobody
   applied the preferred codec when A2DP connected. The S24 keeps the service
-  bound while the device is present. The manifest receiver now stays enabled
-  on API 31 and 32, like on API 28; whether 33 to 35 keep the binding like 36
-  is assumed, no phone of the testbed has them.
+  bound while the device is present. The manifest receiver then stayed
+  enabled on API 31 and 32, like on API 28, and since D17 it's enabled on
+  every level, so API 33 to 35 no longer depend on keeping the binding.
 - C3, recorded as today's behaviour (D8): the device is present without A2DP,
   the app's process is killed, then A2DP connects. On the API 32 Pixel the
   receiver applies the preferred codec. On the S24 the system doesn't start
-  the process again, the receiver is disabled there, and the codec is not
-  applied. That's the risk section 1 names; see D17.
+  the process again; the receiver was disabled there, and the codec wasn't
+  applied. That's the risk section 1 names. Since D17 the receiver is
+  enabled on every level, and the codec is applied on the S24 too.
 - When observing starts while the device's link is already up, the S24
   reports no appearance; there's no change to report. C3 switches the headset
   off and back on without A2DP to get one. BLE sightings on the API 32 Pixel
@@ -985,16 +986,12 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   included, are unlocked during a run.
 - **D16** When reconnecting the headset doesn't connect it, the connect
   fixture taps it in the phone's Bluetooth settings (6.6).
+- **D17** The manifest receiver is enabled on every API level, so the
+  preferred codec is also applied when A2DP connects while the companion
+  service doesn't run (C3). When both apply it, the second request resolves
+  `ALREADY_PENDING`.
 
 ### Open
-
-**D17. Should the preferred codec be applied when the process was killed
-while the device was present?** On API 36 the system doesn't start the app
-again when A2DP connects later (C3), so the codec stays as the phone picked
-it until the device reconnects. Keeping the manifest receiver enabled on every
-API level would cover it, at the cost of a second operation that resolves
-`ALREADY_PENDING` when the service is alive too. Recorded as today's
-behaviour for now (D8).
 
 **D18. Should the service track presence per source on API 36?** The S24
 reports the headset from two sources and reports it gone and back while it's

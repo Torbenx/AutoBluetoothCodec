@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Since API 33 the system keeps CodecCompanionService bound while a device is present -->
-    <bool name="legacy_receiver_enabled">false</bool>
-</resources>

@@ -5,9 +5,7 @@ import android.bluetooth.BluetoothManager
 import android.companion.CompanionDeviceManager
 import android.companion.DeviceNotAssociatedException
 import android.companion.ObservingDevicePresenceRequest
-import android.content.ComponentName
 import android.content.Context
-import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
@@ -15,8 +13,8 @@ import androidx.annotation.RequiresApi
 /**
  * Since API 31 the system binds [CodecCompanionService] when an observed device appears, and since
  * API 33 keeps it bound while the device is present. A device is observed while it's associated and
- * has a preferred codec. Phones without the companion device feature use [A2dpConnectReceiver]
- * instead, like before API 31, and so do API 31 and 32 for A2DP connecting after the device appeared.
+ * has a preferred codec. [A2dpConnectReceiver] applies the preferred codec when A2DP connects on
+ * every phone, with or without the companion device feature.
  */
 object CompanionPresence {
     private const val TAG = "CompanionPresence"
@@ -35,15 +33,13 @@ object CompanionPresence {
     }
 
     /**
-     * Brings the observed devices and the enabled receiver in line with the stored state.
+     * Brings the observed devices in line with the stored state.
      *
-     * Enabling the receiver is required, the manifest can't depend on the companion device feature.
      * The system persists observing across process deaths and reboots, and [update] is called on
      * every change, so the loop only repairs drift: associations kept after clearing app data or
      * a failed call. It can't repair a preferred codec without an association, which requires the user.
      */
     fun syncAll(context: Context) {
-        updateReceiverEnabled(context)
         val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return
         for (address in PermissionUtil.getAssociatedAddresses(context)) {
             // getRemoteDevice only accepts upper case addresses. This runs on every start of the
@@ -104,18 +100,5 @@ object CompanionPresence {
     private fun logObserving(context: Context, device: BluetoothDevice, observe: Boolean) {
         EventLog.get(context).log(EventType.OBSERVING_CHANGED, LogDevice.of(device),
             message = if (observe) "observing presence" else "not observing presence")
-    }
-
-    /**
-     * The manifest enables the receiver only before API 33. Since then it's still needed on phones
-     * without the companion device feature.
-     */
-    private fun updateReceiverEnabled(context: Context) {
-        val needed = Build.VERSION.SDK_INT >= 31 && (Build.VERSION.SDK_INT < 33 || !PermissionUtil.canAssociate(context))
-        context.packageManager.setComponentEnabledSetting(
-            ComponentName(context, A2dpConnectReceiver::class.java),
-            if (needed) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
-            PackageManager.DONT_KILL_APP
-        )
     }
 }

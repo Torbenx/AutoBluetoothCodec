@@ -22,8 +22,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadow.api.Shadow
 
 /**
- * K6 of the test concept: which API levels and phones link devices, observe their presence and
- * use the legacy receiver. Each test runs on every SDK level in its @Config.
+ * K6 of the test concept: which API levels and phones link devices and observe their presence,
+ * and that the manifest receiver is enabled on all of them. Each test runs on every SDK level in its @Config.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(shadows = [ObservingCompanionDeviceManager::class])
@@ -123,16 +123,14 @@ class CompanionPresenceTest {
 
     @Test
     @Config(sdk = [28, 31, 32, 33, 36])
-    fun theReceiverIsEnabledUpTo32AndWithoutTheFeature() {
-        // Up to API 32 the system doesn't keep the companion service bound while the device is present
-        assertEquals(sdk < 33, context.resources.getBoolean(R.bool.legacy_receiver_enabled))
+    fun theReceiverIsEnabledOnEveryLevel() {
+        // It applies the preferred codec when A2DP connects while the companion service doesn't run (C3)
+        val receiver = ComponentName(context, A2dpConnectReceiver::class.java)
+        assertTrue(context.packageManager.getReceiverInfo(receiver, 0).enabled)
         CompanionPresence.syncAll(context)
-        val withFeature = if (sdk in 31..32) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-        assertEquals(withFeature, receiverState)
         setCompanionFeature(false)
         CompanionPresence.syncAll(context)
-        val withoutFeature = if (sdk >= 31) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-        assertEquals(withoutFeature, receiverState)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, receiverState)
     }
 
     @Test

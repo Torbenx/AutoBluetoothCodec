@@ -85,7 +85,7 @@ class A2dpConnectReceiverTest {
         PreferredCodecStore.set(context, device(), sbc())
         val result = deliver(intent())
         runFor(600)
-        assertEquals("legacy receiver", events.first().message)
+        assertEquals("manifest receiver", events.first().message)
         assertEquals(EventType.CODEC_VERIFIED, resolution(operationUid)!!.type)
         assertTrue(isFinished(result))
         // The deadline was removed

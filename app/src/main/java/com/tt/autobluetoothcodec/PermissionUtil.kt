@@ -96,9 +96,9 @@ object PermissionUtil {
     }
 
     /**
-     * Since API 31 the preferred codec is applied by [CodecCompanionService], which the system only
-     * binds for associated devices. Without the companion device feature [A2dpConnectReceiver]
-     * applies it instead.
+     * Since API 31 the preferred codec is applied by [CodecCompanionService] when a device appears,
+     * which the system only does for associated devices. [A2dpConnectReceiver] applies it when A2DP
+     * connects, with or without an association.
      */
     fun isAssociationRequiredForAutoApply(context: Context, device: BluetoothDevice): Boolean {
         return canAssociate(context) && !hasAssociation(context, device)

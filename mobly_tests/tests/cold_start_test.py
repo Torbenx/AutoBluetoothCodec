@@ -27,8 +27,8 @@ APPLY_TIMEOUT = 60.0
 
 # Characterization tests (D8), their results recorded per API level on the testbed (6.7).
 # C3: whether the preferred codec is applied when A2DP connects after the process was killed while
-# the device was present.
-C3_APPLIED = {32: True, 36: False}
+# the device was present. On API 36 too since the manifest receiver is enabled there (D17).
+C3_APPLIED = {32: True, 36: True}
 # C9: whether the preferred codec is applied when the device connects after a force stop.
 C9_FORCE_STOPPED_APPLIED = {28: False, 32: False, 36: True}
 # C13: whether the system keeps reporting the device as present for 5 minutes while it's on
@@ -76,6 +76,9 @@ class ColdStartTest(BaselineTest):
                 asserts.fail(f"{codec} wasn't applied within {timeout:.0f} s, dumpsys shows {dumped}: {self.describe(ops)}")
             time.sleep(1)
 
+    def resolved_after(self, seq):
+        return [op for op in app_log.operations(self.log.events_after(seq)) if op.resolution]
+
     def describe(self, ops):
         return "; ".join(f"{op.trigger['type']} ({op.trigger.get('message', '')}) -> {op.resolution}" for op in ops)
 
@@ -119,7 +122,8 @@ class ColdStartTest(BaselineTest):
         return [f"{op.trigger['type']} {op.resolution}" for op in app_log.operations(self.log.events_after(after))]
 
     def test_c1_killed_app_applies_on_reconnect(self):
-        """App process killed, the headset reconnects: applied, by the receiver up to API 32, the service since."""
+        """App process killed, the headset reconnects: applied. The manifest receiver handles A2DP connecting
+        on every API level (D17), since API 31 the service may apply it first."""
         codec = self.preferred_codec()
         self.save_preferred(codec)
         self.headset_off()
@@ -130,13 +134,16 @@ class ColdStartTest(BaselineTest):
         asserts.assert_false(app.is_running(self.adb), "the system started the app's process again")
         mark = self.log.last_seq()
         self.headset_on()
-        ops = self.wait_for_applied(mark, codec)
+        self.wait_for_applied(mark, codec)
+        end = time.time() + 10
+        while True:
+            ops = self.resolved_after(mark)
+            if any(op.trigger.get("message") == "manifest receiver" for op in ops):
+                break
+            if time.time() >= end:
+                asserts.fail(f"the manifest receiver didn't handle A2DP connecting: {self.describe(ops)}")
+            time.sleep(1)
         self.ad.log.info("C1: %s", self.describe(ops))
-        # Up to API 32 the manifest receiver applies it when A2DP connects, since API 33 the
-        # companion service; either may when the device appears with A2DP connected already
-        if self.sdk >= 33:
-            asserts.assert_false(any(op.trigger.get("message") == "legacy receiver" for op in ops),
-                                 f"the receiver is enabled: {self.describe(ops)}")
 
     def test_c2_app_in_front_applies_on_reconnect(self):
         """The same with the main screen open (manual 2.1)."""
@@ -229,7 +236,8 @@ class ColdStartTest(BaselineTest):
         asserts.assert_false(same_format(codec, bt_oracle.active_codec(self.adb, self.address)), "the codec was applied")
 
     def test_c6_no_preferred_codec(self):
-        """Without a preferred codec the codec isn't touched; since API 33 the app isn't even started."""
+        """Without a preferred codec the codec isn't touched and nothing is logged. The manifest receiver
+        starts the process and returns."""
         app.kill(self.adb)
         mark = self.log.last_seq()
         self.headset.reconnect(self.adb)
@@ -238,13 +246,9 @@ class ColdStartTest(BaselineTest):
         events = self.log.events_after(mark)
         running = app.is_running(self.adb)
         self.ad.log.info("C6: process running %s, events %s", running, [e["type"] for e in events])
-        asserts.assert_equal([], [e["type"] for e in events if e["type"] == "SET_CODEC_CONFIG"], "a codec was set")
+        asserts.assert_equal([], events, "the app logged something")
         dumped = bt_oracle.active_codec(self.adb, self.address)
         asserts.assert_true(self.baseline.own_codec.same_config(dumped), f"dumpsys shows {dumped}")
-        # Up to API 32 the manifest receiver starts the process, and returns without a preferred codec
-        if self.sdk >= 33:
-            asserts.assert_false(running, "the app's process was started")
-            asserts.assert_equal([], events, "the app logged something")
 
     def test_c7_after_a_reboot(self):
         """After a reboot, without opening the app: applied."""
