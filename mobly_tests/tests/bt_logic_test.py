@@ -11,9 +11,13 @@ from mobly.snippet import errors as snippet_errors
 
 from lib import app
 from lib import app_log
+from lib import baseline
 from lib import bt_oracle
 from lib import companion
+from lib import device_state
+from lib import headset
 from lib.bt_oracle import Codec
+from lib.bt_oracle import same_format
 from lib.device_test import BaselineTest
 
 SNIPPET = "snippet"
@@ -23,10 +27,12 @@ LDAC_44_24_909 = Codec(bt_oracle.LDAC, 0x1, 0x2, codec_specific1=10)
 RATE_ORDER = (0x1, 0x2, 0x4, 0x8)
 BITS_ORDER = (0x1, 0x2, 0x4)
 
-
-def same_format(a, b):
-    """The same codec, rate and size, the options aside."""
-    return (a.codec_type, a.sample_rate, a.bits_per_sample) == (b.codec_type, b.sample_rate, b.bits_per_sample)
+# Since API 33 B9 can see observing in dumpsys. Whether clearing the app's data keeps its link is
+# recorded per API level on the testbed (6.7).
+B9_LINK_KEPT_AFTER_CLEAR = {36: False}
+# B7: how a request can end when the phone's Bluetooth turns off during it, depending on whether
+# the profile or the device's connection goes first. On the S24 either does.
+B7_OFF_DURING_REQUEST = ("PROFILE_DISCONNECTED", "NOT_CONNECTED")
 
 
 class SnippetTest(BaselineTest):
@@ -37,7 +43,9 @@ class SnippetTest(BaselineTest):
 
     def teardown_test(self):
         try:
-            self.ad.unload_snippet(SNIPPET)
+            # A test may have unloaded it already
+            if getattr(self.ad, SNIPPET, None) is not None:
+                self.ad.unload_snippet(SNIPPET)
         except Exception:
             self.ad.log.exception("unloading the snippet failed")
         super().teardown_test()
@@ -70,6 +78,31 @@ class SnippetTest(BaselineTest):
 
     def capabilities(self):
         return bt_oracle.device(self.adb, self.address).capabilities
+
+    def other_codec(self, *besides):
+        """A codec to change to, other than the current one and [besides]."""
+        current = self.dumped_codec()
+        candidates = [bt_oracle.other_codec(current, self.capabilities())] + [
+            Codec(c.codec_type, next(r for r in RATE_ORDER if c.sample_rates & r),
+                  next(b for b in BITS_ORDER if c.bits_per_sample & b))
+            for c in self.capabilities() if c.codec_type in bt_oracle.CODEC_NAMES]
+        for codec in candidates:
+            if not same_format(codec, current) and not any(same_format(codec, b) for b in besides):
+                return codec
+        raise AssertionError(f"the device offers no other codec than {current} and {besides}")
+
+    def wait_until_applying(self, after, timeout=60.0):
+        """Waits for an operation after seq [after], not the snippet's, that has set a codec and is
+        still open, and returns it."""
+        end = time.time() + timeout
+        while True:
+            ops = app_log.operations(self.log.events_after(after))
+            for op in ops:
+                if op.trigger.get("message") != "snippet" and op.of_type("SET_CODEC_CONFIG") and not op.resolution:
+                    return op
+            if time.time() >= end:
+                asserts.fail(f"no operation applied a codec within {timeout:.0f} s: {[str(op) for op in ops]}")
+            time.sleep(0.2)
 
 
 class BtLogicTest(SnippetTest):
@@ -146,3 +179,160 @@ class BtLogicTest(SnippetTest):
         companion.link(self.adb, app.PACKAGE, self.address)
         op = self.apply(SBC_44_16)
         asserts.assert_equal("CODEC_VERIFIED", op.resolution, f"with a link: {op}")
+
+    def test_b2_apply_every_rate_size_and_ldac_bitrate(self):
+        """Every rate and size of every codec the phone and headset offer, and every LDAC bitrate."""
+        failures = []
+        for capability in self.capabilities():
+            if capability.codec_type not in bt_oracle.CODEC_NAMES:
+                continue
+            targets = [Codec(capability.codec_type, rate, bits) for rate in RATE_ORDER for bits in BITS_ORDER
+                       if capability.supports(rate, bits)]
+            if capability.codec_type == bt_oracle.LDAC:
+                rate, bits = targets[-1].sample_rate, targets[-1].bits_per_sample
+                targets += [Codec(bt_oracle.LDAC, rate, bits, codec_specific1=10 + bitrate) for bitrate in range(4)]
+            for target in targets:
+                op = self.apply(target)
+                dumped = self.dumped_codec()
+                self.ad.log.info("%s: %s after %s attempts, dumpsys %s", target, op.resolution,
+                                 (op.resolution_event or {}).get("attempt"), dumped)
+                applied = same_format(target, dumped)
+                # The stack reports the LDAC bitrate it uses as 1000 to 1003
+                if target.codec_specific1:
+                    applied = applied and dumped.codec_specific1 % 10 == target.codec_specific1 % 10
+                if op.resolution != "CODEC_VERIFIED" or not applied:
+                    failures.append(f"{target}: {op.resolution}, dumpsys {dumped}")
+        asserts.assert_equal([], failures, "configurations that weren't applied")
+
+    def test_b4_a_codec_outside_the_capabilities(self):
+        """A codec the headset doesn't offer resolves MAX_ATTEMPTS after 5 attempts, the codec stays as it was."""
+        before = self.dumped_codec()
+        target = bt_oracle.codec_outside(self.capabilities())
+        op = self.apply(target)
+        asserts.assert_equal("MAX_ATTEMPTS", op.resolution, str(op))
+        asserts.assert_equal(5, op.resolution_event.get("attempt"), str(op))
+        after = self.dumped_codec()
+        asserts.assert_true(same_format(before, after), f"applying {target} changed {before} to {after}")
+
+    def test_b5_already_pending_and_superseded(self):
+        """The same codec again while it's applied is ALREADY_PENDING, another one supersedes it (manual 1.4, 1.5)."""
+        first = self.other_codec()
+        second = self.other_codec(first)
+        uid = self.snippet.startApplyCodec(self.address, first.to_app())
+        again = self.apply(first)
+        asserts.assert_equal("ALREADY_PENDING", again.resolution, str(again))
+        asserts.assert_equal(f"pending in operation {uid}", again.resolution_event.get("message"), str(again))
+        newer = self.snippet.startApplyCodec(self.address, second.to_app())
+        # Replaced in one step, the device never shows as idle
+        asserts.assert_true(self.address in [a.upper() for a in self.snippet.getPending()], "the device isn't pending")
+        superseded = self.operation(uid)
+        asserts.assert_equal("SUPERSEDED", superseded.resolution,
+                             f"{superseded}, was it verified before the second request?")
+        asserts.assert_equal(f"superseded by operation {newer}", superseded.resolution_event.get("message"))
+        op = self.operation(newer, timeout=20)
+        asserts.assert_equal("CODEC_VERIFIED", op.resolution, str(op))
+        asserts.assert_true(same_format(second, self.dumped_codec()), f"dumpsys shows {self.dumped_codec()}")
+
+    def test_b6_a_disconnected_device(self):
+        """A device without A2DP resolves NOT_CONNECTED."""
+        self.require_capability(headset.A2DP_SWITCH)
+        self.headset.disconnect_a2dp()
+        bt_oracle.wait_connected(self.adb, self.address, timeout=30, connected=False)
+        op = self.apply(SBC_44_16)
+        asserts.assert_equal("NOT_CONNECTED", op.resolution, str(op))
+
+    def test_b7_bluetooth_off_and_on(self):
+        """Bluetooth off: PROFILE_UNAVAILABLE; off during a request: PROFILE_DISCONNECTED or
+        NOT_CONNECTED; back on the next request opens a new proxy and verifies (manual 2.3)."""
+        first = self.other_codec()
+        # The applier's proxy is open when Bluetooth turns off
+        asserts.assert_equal("CODEC_VERIFIED", self.apply(first).resolution)
+        device_state.set_bluetooth(self.adb, False)
+        op = self.apply(first)
+        asserts.assert_equal("PROFILE_UNAVAILABLE", op.resolution, str(op))
+        baseline.connect(self.adb, self.headset)
+        # A codec the headset doesn't offer keeps the request open for 5 attempts
+        uid = self.snippet.startApplyCodec(self.address, bt_oracle.codec_outside(self.capabilities()).to_app())
+        time.sleep(1)
+        device_state.set_bluetooth(self.adb, False)
+        op = self.operation(uid, timeout=20)
+        self.ad.log.info("B7 off during a request: %s", op)
+        asserts.assert_true(op.resolution in B7_OFF_DURING_REQUEST, str(op))
+        baseline.connect(self.adb, self.headset)
+        op = self.apply(self.other_codec())
+        asserts.assert_equal("CODEC_VERIFIED", op.resolution, f"after Bluetooth came back: {op}")
+
+    def test_b9_observing(self):
+        """Observing: on with a preferred codec, off when it's deleted, and after clearing the app's
+        data the next start turns it off. Whether the link stays is recorded (6.7)."""
+        self.require(self.sdk >= 33, "observing only shows in dumpsys since API 33")
+
+        def wait_observing(expected, what):
+            end = time.time() + 10
+            # Without an association there's nothing to observe, and dumpsys doesn't say
+            while bool(companion.is_observing(self.adb, app.PACKAGE, self.address)) != expected:
+                if time.time() >= end:
+                    asserts.fail(f"{what}: observing isn't {expected}")
+                time.sleep(0.5)
+
+        self.snippet.setPreferredCodec(self.address, SBC_44_16.to_app())
+        wait_observing(True, "with a preferred codec")
+        self.snippet.deletePreferredCodec(self.address)
+        wait_observing(False, "after deleting it")
+        self.snippet.setPreferredCodec(self.address, SBC_44_16.to_app())
+        wait_observing(True, "with a preferred codec again")
+        self.ad.unload_snippet(SNIPPET)
+        app.clear_data(self.adb)
+        linked = companion.is_linked(self.adb, app.PACKAGE, self.address)
+        observing = linked and companion.is_observing(self.adb, app.PACKAGE, self.address)
+        self.ad.log.info("B9 after clearing the data on API %d: linked %s, observing %s", self.sdk, linked, observing)
+        app.grant_permission(self.adb)
+        app.launch(self.adb)
+        wait_observing(False, "after the next start")
+        app.go_home(self.adb)
+        expected = B9_LINK_KEPT_AFTER_CLEAR.get(self.sdk)
+        if expected is None:
+            asserts.explicit_pass(f"recorded: the link is {'kept' if linked else 'removed'}; "
+                                  f"add it to B9_LINK_KEPT_AFTER_CLEAR for API {self.sdk}")
+        asserts.assert_equal(expected, linked, "the link after clearing the app's data")
+
+    def test_b11_an_external_change_is_logged_once(self):
+        """A codec set bypassing the applier, with the main screen open, is logged once as an external
+        change; the app's own changes never are (manual 2.2)."""
+        app.launch(self.adb)
+        # The first start logs the current codec, the log is empty
+        self.log.wait_for_event("ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE", timeout=10)
+        time.sleep(2)
+        external = self.other_codec()
+        mark = self.log.last_seq()
+        self.snippet.setCodecDirectly(self.address, external.to_app())
+        bt_oracle.wait_for(self.adb, lambda s: same_format(external, s.device(self.address).codec), 10,
+                           what=str(external))
+        # The main screen polls every second
+        time.sleep(3)
+        logged = [e for e in self.log.events_after(mark) if e["type"] == "ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE"]
+        asserts.assert_equal(1, len(logged), f"external changes logged: {logged}")
+        asserts.assert_equal(external.codec_type, logged[0]["actual"]["android"]["codecType"], str(logged[0]))
+        mark = self.log.last_seq()
+        op = self.apply(self.other_codec(external))
+        asserts.assert_equal("CODEC_VERIFIED", op.resolution, str(op))
+        time.sleep(3)
+        logged = [e for e in self.log.events_after(mark) if e["type"] == "ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE"]
+        asserts.assert_equal([], logged, "the app's own change was logged as external")
+        app.go_home(self.adb)
+
+    def test_b12_a_request_supersedes_the_preferred_codec_on_connect(self):
+        """A request while the service or receiver applies the preferred codec on connect supersedes
+        it, and the requested codec wins."""
+        # A preferred codec the headset doesn't offer keeps the background operation open for 5 attempts
+        self.snippet.setPreferredCodec(self.address, bt_oracle.codec_outside(self.capabilities()).to_app())
+        mark = self.log.last_seq()
+        self.headset.reconnect(self.adb)
+        background = self.wait_until_applying(mark)
+        requested = self.other_codec()
+        op = self.apply(requested)
+        background = self.operation(background.uid)
+        self.ad.log.info("B12: %s; %s", background, op)
+        asserts.assert_equal("SUPERSEDED", background.resolution, str(background))
+        asserts.assert_equal("CODEC_VERIFIED", op.resolution, str(op))
+        asserts.assert_true(same_format(requested, self.dumped_codec()), f"dumpsys shows {self.dumped_codec()}")
