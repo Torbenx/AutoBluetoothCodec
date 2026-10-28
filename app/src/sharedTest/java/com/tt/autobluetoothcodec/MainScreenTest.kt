@@ -21,7 +21,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** V2 to V6 of the test concept: what the main screen shows for a device, and what it asks for. */
+/** V1 to V6 of the test concept: the permission screens, what the main screen shows for a device, and what it asks for. */
 @RunWith(AndroidJUnit4::class)
 class MainScreenTest {
     @get:Rule
@@ -46,6 +46,27 @@ class MainScreenTest {
 
     /** A chip of the expanded card, scrolled into view since the card may not fit on the screen. */
     private fun chip(text: String) = compose.onNodeWithText(text).performScrollTo()
+
+    // V1
+
+    @Test
+    fun withoutThePermissionItIsRequested() {
+        show(state(device(), permissionState = PermissionState.DENIED))
+        text(NAME).assertDoesNotExist()
+        text("Allow it in the app settings under Permissions.").assertDoesNotExist()
+        text("Grant permission").performClick()
+        assertEquals(listOf("requestPermission"), actions.calls)
+    }
+
+    @Test
+    fun afterAPermanentDenialTheSettingsAreOffered() {
+        show(state(device(), permissionState = PermissionState.PERMANENTLY_DENIED))
+        text(NAME).assertDoesNotExist()
+        text("Grant permission").assertDoesNotExist()
+        text("Allow it in the app settings under Permissions.").assertExists()
+        text("Open settings").performClick()
+        assertEquals(listOf("openAppSettings"), actions.calls)
+    }
 
     // V2
 

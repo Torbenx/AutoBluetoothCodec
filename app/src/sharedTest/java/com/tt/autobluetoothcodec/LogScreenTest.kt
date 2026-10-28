@@ -1,5 +1,8 @@
 package com.tt.autobluetoothcodec
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasScrollToKeyAction
@@ -15,6 +18,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -25,7 +29,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * V8 and V9 of the test concept: the log screen's texts and structure. Dates and numbers are
+ * V8 to V11 of the test concept: the log screen's texts, structure, updates and dialogs. Dates and numbers are
  * formatted for the phone's locale and time zone, so the tests set both.
  */
 @RunWith(AndroidJUnit4::class)
@@ -313,5 +317,49 @@ class LogScreenTest {
         list.performScrollToKey("day 2026-10-25")
         list.performScrollToKey(newest.seq)
         compose.onNodeWithText("Setting codec, attempt 1", substring = true, useUnmergedTree = true).assertExists()
+    }
+
+    // V10
+
+    @Test
+    fun newEventsShowWhileTheScreenIsOpen() {
+        var events by mutableStateOf(listOf(event(EventType.TEST_LABEL, device = null, message = "first")))
+        compose.setContent { LogScreen(events, today, actions) }
+        assertShown("Test: first")
+        events = listOf(event(EventType.TEST_LABEL, device = null, message = "second")) + events
+        assertShown("Test: second")
+        assertShown("Test: first")
+        // A cleared log shows the empty state
+        events = emptyList()
+        compose.onNodeWithText("No events logged yet").assertExists()
+    }
+
+    // V11
+
+    @Test
+    fun clearingAsksFirst() {
+        show(listOf(event(EventType.TEST_LABEL, device = null, message = "step 1")))
+        compose.onNodeWithTag("clear_log").performClick()
+        compose.onNodeWithText("Clear log?").assertExists()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Clear log?").assertDoesNotExist()
+        assertEquals(emptyList<String>(), actions.calls)
+        compose.onNodeWithTag("clear_log").performClick()
+        compose.onNodeWithText("Clear").performClick()
+        compose.onNodeWithText("Clear log?").assertDoesNotExist()
+        assertEquals(listOf("clear"), actions.calls)
+    }
+
+    @Test
+    fun sharingExportsTheChosenMode() {
+        show(listOf(event(EventType.TEST_LABEL, device = null, message = "step 1")))
+        compose.onNodeWithTag("share_log").performClick()
+        compose.onNodeWithText("Share").performClick()
+        compose.onNodeWithTag("share_log").performClick()
+        compose.onNodeWithText("Full").performClick()
+        compose.onNodeWithText("Share").performClick()
+        compose.onNodeWithTag("share_log").performClick()
+        compose.onNodeWithText("Cancel").performClick()
+        assertEquals(listOf("share ANONYMISED", "share FULL"), actions.calls)
     }
 }
