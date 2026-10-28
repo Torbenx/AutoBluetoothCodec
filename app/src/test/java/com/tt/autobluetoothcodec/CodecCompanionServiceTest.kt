@@ -17,6 +17,7 @@ import com.tt.autobluetoothcodec.TestSupport.resetApp
 import com.tt.autobluetoothcodec.TestSupport.resolution
 import com.tt.autobluetoothcodec.TestSupport.runFor
 import com.tt.autobluetoothcodec.TestSupport.runPending
+import com.tt.autobluetoothcodec.TestSupport.VERIFY_MILLIS
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -72,7 +73,7 @@ class CodecCompanionServiceTest {
 
     private fun presence(associationId: Int, event: Int) {
         service.onDevicePresenceEvent(DevicePresenceEvent(associationId, event, null))
-        runFor(600)
+        runFor(VERIFY_MILLIS)
     }
 
     @Test
@@ -90,10 +91,10 @@ class CodecCompanionServiceTest {
         PreferredCodecStore.set(context, device(), sbc())
         val before = receiverCount()
         service.onDeviceAppeared(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(before + 1, receiverCount())
         service.onDeviceAppeared(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(before + 1, receiverCount())
         val appeared = operations(EventType.DEVICE_APPEARED)
         assertEquals(2, appeared.size)
@@ -106,10 +107,10 @@ class CodecCompanionServiceTest {
         PreferredCodecStore.set(context, device(ADDRESS), sbc())
         PreferredCodecStore.set(context, device(OTHER_ADDRESS), sbc())
         service.onDeviceAppeared(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         a2dpConnected(ADDRESS)
         a2dpConnected(OTHER_ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         val connected = operations(EventType.A2DP_CONNECTED).filter { it.message == "companion service" }
         assertEquals(listOf(ADDRESS), connected.map { it.device!!.address })
         assertEquals(EventType.CODEC_VERIFIED, resolution(connected.single().opUID!!)!!.type)
@@ -136,7 +137,7 @@ class CodecCompanionServiceTest {
         PreferredCodecStore.set(context, device(), sbc())
         val before = receiverCount()
         service.onDeviceAppeared(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         controller.destroy()
         assertEquals(before, receiverCount())
     }
@@ -145,12 +146,12 @@ class CodecCompanionServiceTest {
     fun aRestartedServiceKnowsNoPresentDevices() {
         PreferredCodecStore.set(context, device(), sbc())
         service.onDeviceAppeared(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         // Like the system restarting the process: a new instance, without onDeviceAppeared
         controller.destroy()
         controller = Robolectric.buildService(CodecCompanionService::class.java).create()
         a2dpConnected(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertTrue(operations(EventType.A2DP_CONNECTED).none { it.message == "companion service" })
     }
 
@@ -177,7 +178,7 @@ class CodecCompanionServiceTest {
         presence(id, DevicePresenceEvent.EVENT_BLE_DISAPPEARED)
         assertTrue(operations(EventType.DEVICE_DISAPPEARED).isEmpty())
         a2dpConnected(ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         val connected = operations(EventType.A2DP_CONNECTED).single { it.message == "companion service" }
         assertEquals(EventType.CODEC_VERIFIED, resolution(connected.opUID!!)!!.type)
         presence(id, DevicePresenceEvent.EVENT_BT_DISCONNECTED)

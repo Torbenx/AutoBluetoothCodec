@@ -36,6 +36,9 @@ object TestSupport {
         return CodecApplier.get(context)
     }
 
+    /** How long a codec that takes effect at once takes to be verified: two reads, 500 ms apart. */
+    const val VERIFY_MILLIS = 1_100L
+
     /** Runs the main looper's tasks for [millis], advancing the clock. */
     fun runFor(millis: Long) = shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(millis))
 

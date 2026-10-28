@@ -2,7 +2,7 @@
 
 How Auto Bluetooth Codec is tested: which test levels exist, what each one
 covers, which information and control channels they use, what the harness
-needs, and in which order it's built. The decisions behind it, D1 to D18, are
+needs, and in which order it's built. The decisions behind it, D1 to D19, are
 listed in [section 13](#13-decisions) and referenced where they matter.
 
 Two manual test records, `tools/codec-applier-tests.md` and
@@ -235,7 +235,7 @@ levels and fakes that a phone can't provide.
 
 | ID | Test | Prio |
 | --- | --- | --- |
-| K1 | `CodecApplier` resolutions: `CODEC_VERIFIED` on attempt 1 and N, `MAX_ATTEMPTS` after 5, `NOT_CONNECTED`, `NO_ASSOCIATION` (34, 36), `NO_PERMISSION` (31+), `NO_PREFERRED_CODEC`, `PROFILE_UNAVAILABLE` (Bluetooth off, no proxy), `PROFILE_DISCONNECTED`, `SECURITY_EXCEPTION`, hand-back to `onSecurityException`, `ERROR` | P1 |
+| K1 | `CodecApplier` resolutions: `CODEC_VERIFIED` on attempt 1 and N after two matching reads, a codec changed back after the first matching read set again (D19), `MAX_ATTEMPTS` after 5, `NOT_CONNECTED`, `NO_ASSOCIATION` (34, 36), `NO_PERMISSION` (31+), `NO_PREFERRED_CODEC`, `PROFILE_UNAVAILABLE` (Bluetooth off, no proxy), `PROFILE_DISCONNECTED`, `SECURITY_EXCEPTION`, hand-back to `onSecurityException`, `ERROR` | P1 |
 | K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request | P1 |
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
@@ -497,7 +497,8 @@ phone and that headset, and names the testbed after both.
 
 Tests poll with a timeout instead of sleeping. The timeouts come from the app's
 constants: a request verifies or gives up within about 3 s once the profile
-proxy is connected (5 attempts, 500 ms apart), the receiver gives up after
+proxy is connected (5 attempts, 500 ms apart; a codec counts as applied after
+two matching reads, so at least 1 s), the receiver gives up after
 15 s, the main screen reads the codec every second. On API 32 a device
 disappears 7–8 s after its BLE advertisements stop. A Qudelix `cycle` takes
 5 s off plus its reboot. A timeout fails the test with the log tail and the
@@ -929,7 +930,8 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   device. The stack reported SBC, then switched back to LDAC 96 kHz by itself
   6 ms later. The app's check 500 ms after the change still read SBC and
   resolved `CODEC_VERIFIED`, while LDAC stayed active. The next two runs of E3
-  and every other reconnect on the S24 applied the codec, see D19.
+  and every other reconnect on the S24 applied the codec. Since D19 a codec
+  counts as applied only after two matching reads.
 - Play Protect asked again for the snippet APK of a new build. The install
   timeout stopped the run with its message, and declining the upload let the
   install finish. Since then its option to send unknown apps is off on the
@@ -1003,22 +1005,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   connecting can't be reproduced on demand, the gaps come at random times, so
   the component tests (K5) cover it; C1 and C2 check one appearance per
   reconnect on API 36.
-
-### Open
-
-**D19. How should the applier handle the S24 changing the codec back right
-after A2DP connects?** In one of four runs of E3 the stack switched back to
-its own codec 6 ms after the app's change, and the status the app reads
-lagged behind, so the app verified a codec that wasn't active (section 12).
-- (a) Requests started by a connect wait until the device is the active A2DP
-  device, plus a short delay, before the first attempt.
-- (b) A request is verified only when two reads 500 ms apart both match, so a
-  change back within that time is applied again. Every request takes 500 ms
-  longer.
-- (c) After verifying, the applier watches `ACTION_CODEC_CONFIG_CHANGED` for a
-  few seconds and applies the codec again if it changes.
-
-*Recommendation:* (b): it doesn't depend on how a phone announces its active
-device, and also covers changes back after a choice on the main screen. It
-can't be tested on demand on the phones, since the race is rare; component
-tests with the fake can make the stack change back.
+- **D19** A codec counts as applied once two reads in a row, 500 ms apart,
+  report it; a codec that changed back after the first matching read is set
+  again, as the next attempt. It covers the S24 changing the codec back right
+  after A2DP connects, while the codec it reports lags behind. The race is too
+  rare to reproduce on the phones, so the component tests (K1) make the fake
+  stack change back.

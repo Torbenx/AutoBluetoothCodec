@@ -14,6 +14,7 @@ import com.tt.autobluetoothcodec.TestSupport.events
 import com.tt.autobluetoothcodec.TestSupport.resetApp
 import com.tt.autobluetoothcodec.TestSupport.resolution
 import com.tt.autobluetoothcodec.TestSupport.runFor
+import com.tt.autobluetoothcodec.TestSupport.VERIFY_MILLIS
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -84,7 +85,7 @@ class A2dpConnectReceiverTest {
     fun appliesThePreferredCodecAndFinishesAfterTheLog() {
         PreferredCodecStore.set(context, device(), sbc())
         val result = deliver(intent())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals("manifest receiver", events.first().message)
         assertEquals(EventType.CODEC_VERIFIED, resolution(operationUid)!!.type)
         assertTrue(isFinished(result))

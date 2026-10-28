@@ -13,6 +13,7 @@ import com.tt.autobluetoothcodec.TestSupport.resetApp
 import com.tt.autobluetoothcodec.TestSupport.resolution
 import com.tt.autobluetoothcodec.TestSupport.runFor
 import com.tt.autobluetoothcodec.TestSupport.runPending
+import com.tt.autobluetoothcodec.TestSupport.VERIFY_MILLIS
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -64,10 +65,11 @@ class CodecApplierTest {
     @Test
     fun verifiedOnTheFirstAttempt() {
         val (operation, done) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, done.only)
+        // Read twice before it counts
         assertEquals(listOf(EventType.USER_SET_CODEC, EventType.SET_CODEC_CONFIG, EventType.VALIDATE_CODEC_CONFIG,
-            EventType.CODEC_VERIFIED), types(operation))
+            EventType.VALIDATE_CODEC_CONFIG, EventType.CODEC_VERIFIED), types(operation))
         assertEquals(1, resolution(operation.uid)!!.attempt)
         assertEquals(sbc().toAndroid(), resolution(operation.uid)!!.actual!!.android)
         assertTrue(applier.pending.value.isEmpty())
@@ -78,10 +80,25 @@ class CodecApplierTest {
         var sets = 0
         a2dp.onSet = { address, config -> if (++sets >= 3) a2dp.codecs[address] = config }
         val (operation, done) = apply(sbc())
-        runFor(2000)
+        runFor(2500)
         assertEquals(EventType.CODEC_VERIFIED, done.only)
         assertEquals(3, resolution(operation.uid)!!.attempt)
         assertEquals(3, types(operation).count { it == EventType.SET_CODEC_CONFIG })
+    }
+
+    @Test
+    fun aCodecChangedBackAfterTheFirstMatchingReadIsSetAgain() {
+        val (operation, done) = apply(sbc())
+        runFor(600)
+        // Like the S24 right after A2DP connects: it reported the codec, then went back to its own
+        a2dp.codecs[ADDRESS] = ldac().toAndroid()
+        runFor(VERIFY_MILLIS + 500)
+        assertEquals(EventType.CODEC_VERIFIED, done.only)
+        assertEquals(2, resolution(operation.uid)!!.attempt)
+        assertEquals(listOf(EventType.USER_SET_CODEC, EventType.SET_CODEC_CONFIG, EventType.VALIDATE_CODEC_CONFIG,
+            EventType.VALIDATE_CODEC_CONFIG, EventType.SET_CODEC_CONFIG, EventType.VALIDATE_CODEC_CONFIG,
+            EventType.VALIDATE_CODEC_CONFIG, EventType.CODEC_VERIFIED), types(operation))
+        assertEquals(sbc().toAndroid(), a2dp.codecs[ADDRESS])
     }
 
     @Test
@@ -101,7 +118,7 @@ class CodecApplierTest {
     fun notConnected() {
         a2dp.connected.clear()
         val (operation, done) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.NOT_CONNECTED, done.only)
         assertTrue(a2dp.setCalls.isEmpty())
         assertEquals(0, resolution(operation.uid)!!.attempt)
@@ -111,7 +128,7 @@ class CodecApplierTest {
     @Config(sdk = [34])
     fun noAssociationSince34() {
         val (_, done) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.NO_ASSOCIATION, done.only)
         assertTrue(a2dp.setCalls.isEmpty())
     }
@@ -136,7 +153,7 @@ class CodecApplierTest {
     fun appliesThePreferredCodecWithoutTarget() {
         PreferredCodecStore.set(context, device(), sbc())
         val (operation, done) = apply(null)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, done.only)
         assertEquals(sbc().toAndroid(), resolution(operation.uid)!!.actual!!.android)
     }
@@ -169,7 +186,7 @@ class CodecApplierTest {
         // The next request asks for the profile again
         a2dp.onSet = { address, config -> a2dp.codecs[address] = config }
         val (_, next) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(2, a2dp.connectCount)
         assertEquals(EventType.CODEC_VERIFIED, next.only)
     }
@@ -212,7 +229,7 @@ class CodecApplierTest {
         val (second, secondDone) = apply(sbc())
         assertEquals(EventType.ALREADY_PENDING, secondDone.only)
         assertEquals("pending in operation ${first.uid}", resolution(second.uid)!!.message)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, firstDone.only)
     }
 
@@ -228,7 +245,7 @@ class CodecApplierTest {
         assertEquals(EventType.SUPERSEDED, resolution(first.uid)!!.type)
         assertEquals("superseded by operation ${second.uid}", resolution(first.uid)!!.message)
         assertEquals(1, resolution(first.uid)!!.attempt)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, secondDone.only)
         assertEquals(ldac().toAndroid(), a2dp.codecs[ADDRESS])
     }
@@ -266,7 +283,7 @@ class CodecApplierTest {
         }
         val (operation, done) = apply(sbc())
         val (other, otherDone) = apply(ldac(), OTHER_ADDRESS)
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, done.only)
         assertNull(otherDone.only)
         assertEquals(setOf(OTHER_ADDRESS), applier.pending.value.keys)
@@ -283,12 +300,12 @@ class CodecApplierTest {
         val (_, other) = apply(ldac(), OTHER_ADDRESS)
         assertEquals(1, a2dp.connectCount)
         a2dp.connectProfile()
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, first.only)
         assertEquals(EventType.CODEC_VERIFIED, other.only)
         // Kept open after the requests
         val (_, later) = apply(ldac())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, later.only)
         assertEquals(1, a2dp.connectCount)
         assertEquals(0, a2dp.closeCount)
@@ -297,7 +314,7 @@ class CodecApplierTest {
     @Test
     fun aDisconnectWhileIdleClosesTheProfileAndTheNextRequestOpensIt() {
         val (_, first) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, first.only)
         // Like Bluetooth turning off (manual 2.3)
         a2dp.disconnectProfile()
@@ -308,7 +325,7 @@ class CodecApplierTest {
         assertEquals(1, a2dp.connectCount)
         a2dp.isBluetoothEnabled = true
         val (_, on) = apply(ldac())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, on.only)
         assertEquals(2, a2dp.connectCount)
         assertEquals(1, a2dp.closeCount)
@@ -317,7 +334,7 @@ class CodecApplierTest {
     @Test
     fun resettingTheApplierClosesTheProfile() {
         val (_, done) = apply(sbc())
-        runFor(600)
+        runFor(VERIFY_MILLIS)
         assertEquals(EventType.CODEC_VERIFIED, done.only)
         CodecApplier.resetForTest(context)
         assertEquals(1, a2dp.closeCount)

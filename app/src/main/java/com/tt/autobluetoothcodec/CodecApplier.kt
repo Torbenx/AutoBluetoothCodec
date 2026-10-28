@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Applies codecs to connected devices and checks that they took effect, trying again a few times
- * if they didn't. There is one applier per process, so the requests of the UI, [CodecCompanionService]
+ * if they didn't. A codec counts as applied once two reads in a row, [VERIFY_DELAY_MILLIS] apart,
+ * report it: right after A2DP connects the S24 sometimes changes the codec back to its own choice
+ * while the codec it reports still lags behind. There is one applier per process, so the requests of the UI, [CodecCompanionService]
  * and [A2dpConnectReceiver] are coordinated: each device has at most one pending request. A request
  * for a different codec supersedes the pending one, a request for the same codec is dropped.
  *
@@ -33,6 +35,7 @@ class CodecApplier @VisibleForTesting internal constructor(
         private const val TAG = "CodecApplier"
         private const val VERIFY_DELAY_MILLIS: Long = 500
         private const val MAX_ATTEMPT_COUNT = 5
+        private const val VERIFYING_READ_COUNT = 2
 
         private var instance: CodecApplier? = null
 
@@ -199,7 +202,7 @@ class CodecApplier @VisibleForTesting internal constructor(
         val now = SystemClock.uptimeMillis()
         for (request in requests.toList()) {
             // The callback of an earlier request may have changed the requests
-            if (request !in requests || now - request.lastApplyAttempt < VERIFY_DELAY_MILLIS)
+            if (request !in requests || now - request.lastStep < VERIFY_DELAY_MILLIS)
                 continue
             try {
                 process(request, now)
@@ -219,12 +222,15 @@ class CodecApplier @VisibleForTesting internal constructor(
             }
         }
         if (profileConnected && requests.isNotEmpty()) {
-            val nextAttempt = requests.minOf { it.lastApplyAttempt } + VERIFY_DELAY_MILLIS
-            handler.postAtTime(processRunnable, nextAttempt)
+            val nextStep = requests.minOf { it.lastStep } + VERIFY_DELAY_MILLIS
+            handler.postAtTime(processRunnable, nextStep)
         }
     }
 
-    /** Verifies the previous attempt of [request] and makes the next one, or finishes the request. */
+    /**
+     * Verifies the previous attempt of [request] and makes the next one, reads the codec again after
+     * the first matching read, or finishes the request.
+     */
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     private fun process(request: Request, now: Long) {
         val operation = request.operation
@@ -244,9 +250,16 @@ class CodecApplier @VisibleForTesting internal constructor(
             actual = a2dp.getCodec(request.device)?.let { LogCodecConfig.of(it) }
             operation.log(EventType.VALIDATE_CODEC_CONFIG, config = target, actual = actual, attempt = request.attemptCount)
             if (actual?.own?.let { request.target.isFulfilledBy(it) } == true) {
-                finish(request, EventType.CODEC_VERIFIED, actual = actual, attempt = request.attemptCount)
+                request.matchingReads += 1
+                if (request.matchingReads >= VERIFYING_READ_COUNT) {
+                    finish(request, EventType.CODEC_VERIFIED, actual = actual, attempt = request.attemptCount)
+                } else {
+                    request.lastStep = now
+                }
                 return
             }
+            // Not the target, or changed back after a matching read: it's set again
+            request.matchingReads = 0
         }
 
         if (request.attemptCount >= MAX_ATTEMPT_COUNT) {
@@ -257,7 +270,7 @@ class CodecApplier @VisibleForTesting internal constructor(
         request.attemptCount += 1
         operation.log(EventType.SET_CODEC_CONFIG, config = target, attempt = request.attemptCount)
         a2dp.setCodec(request.device, request.target.toAndroid())
-        request.lastApplyAttempt = now
+        request.lastStep = now
     }
 
     private class Request(
@@ -266,6 +279,9 @@ class CodecApplier @VisibleForTesting internal constructor(
         val operation: EventLog.Operation,
         val onDone: ((EventType) -> Unit)?,
         val onSecurityException: ((EventLog.Operation, SecurityException) -> Unit)?,
-        var lastApplyAttempt: Long = 0,
-        var attemptCount: Int = 0)
+        // When the codec was last set or read
+        var lastStep: Long = 0,
+        var attemptCount: Int = 0,
+        // Reads in a row that reported the target since the last attempt
+        var matchingReads: Int = 0)
 }
