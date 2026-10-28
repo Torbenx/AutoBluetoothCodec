@@ -952,6 +952,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevelopmentOptions: Boolean, actions: MainScreenActions) {
     var expanded by remember { mutableStateOf(false) }
@@ -960,7 +961,9 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("device_menu")) {
             Icon(Icons.Default.MoreVert, contentDescription = "More options")
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        // A menu is a popup, outside the Scaffold that exposes the test tags to UiAutomator
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+            modifier = Modifier.semantics { testTagsAsResourceId = true }) {
             if (preferredConfig != null && !isPreferredActive) {
                 DropdownMenuItem(
                     text = { Text("Restore Preferred Codec") },
@@ -1052,6 +1055,7 @@ private fun PermissionRequired(modifier: Modifier, permissionState: PermissionSt
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun AppMenu(onOpenLog: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
@@ -1059,7 +1063,9 @@ private fun AppMenu(onOpenLog: () -> Unit) {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("app_menu")) {
             Icon(Icons.Default.MoreVert, contentDescription = "More options")
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        // A menu is a popup, outside the Scaffold that exposes the test tags to UiAutomator
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+            modifier = Modifier.semantics { testTagsAsResourceId = true }) {
             DropdownMenuItem(
                 text = { Text("Log") },
                 modifier = Modifier.testTag("open_log"),
