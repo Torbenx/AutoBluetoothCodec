@@ -24,6 +24,8 @@ SNIPPET = "snippet"
 SBC_44_16 = Codec(bt_oracle.SBC, 0x1, 0x1)
 AAC_44_16 = Codec(bt_oracle.AAC, 0x1, 0x1)
 APPLY_TIMEOUT = 60.0
+# The API 32 Pixel sees a device appear through BLE scans, which took from seconds to over 90 s
+APPEARANCE_TIMEOUT = 180.0
 
 # Characterization tests (D8), their results recorded per API level on the testbed (6.7).
 # C3: whether the preferred codec is applied when A2DP connects after the process was killed while
@@ -189,8 +191,8 @@ class ColdStartTest(BaselineTest):
         # Back on without A2DP: the device appears, and the service keeps it as present
         mark = self.log.last_seq()
         self.headset.power_on(a2dp=False)
-        # Seen through BLE scans or the link, which took from seconds to over a minute
-        appeared = self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=90)
+        # Seen through BLE scans or the link
+        appeared = self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
         self.ad.log.info("C3: %s", appeared)
         app.kill(self.adb)
         time.sleep(5)
@@ -234,10 +236,13 @@ class ColdStartTest(BaselineTest):
         codec = self.preferred_codec()
         self.save_preferred(codec)
         app.revoke_permission(self.adb)
+        # Without the permission the receiver gets no broadcast, only the device appearing again starts
+        # the service. On API 32 a device is gone 7 to 8 s after its BLE advertisements stop.
+        self.headset_off()
+        time.sleep(15)
         mark = self.log.last_seq()
-        self.headset.reconnect(self.adb)
-        # The service gets the device when it appears, seen through BLE scans or the link
-        op = self.log.wait_for_operation(after=mark, device=self.address, timeout=90)
+        self.headset_on()
+        op = self.log.wait_for_operation(after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
         time.sleep(10)
         ops = app_log.operations(self.log.events_after(mark))
         self.ad.log.info("C5: %s", self.describe(ops))
@@ -336,7 +341,7 @@ class ColdStartTest(BaselineTest):
         time.sleep(15)
         mark = self.log.last_seq()
         self.headset.power_on(a2dp=False)
-        self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=90)
+        self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
         time.sleep(10)
         recorded["headset on"] = self.summary(mark)
         # The phone's Bluetooth off and back on
@@ -345,7 +350,7 @@ class ColdStartTest(BaselineTest):
         time.sleep(15)
         device_state.set_bluetooth(self.adb, True)
         try:
-            self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=90)
+            self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
         except TimeoutError:
             # The S24 sees the device over BLE with its Bluetooth off, so it may never be gone
             pass

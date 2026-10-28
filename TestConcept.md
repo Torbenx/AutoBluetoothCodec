@@ -948,6 +948,10 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   codec makes the device appear at once and the service apply the codec, so a
   test waits for that operation before unloading, or the log check reports it
   interrupted.
+- A `cycle` doesn't always make the API 32 Pixel see the headset go: it
+  counts a device as gone 7–8 s after its BLE advertisements stop. C5, which
+  without the permission depends on the device appearing again, switches the
+  headset off for 15 s instead, like C1.
 - The Qudelix once didn't answer its mode query for about 3 minutes. The
   backend retries it for 20 s; beyond that the class is aborted, like any
   baseline that can't be checked, instead of every test failing on it.
