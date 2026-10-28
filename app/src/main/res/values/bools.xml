@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Before API 31 there is no CompanionDeviceService, so the manifest receiver applies the preferred codec -->
+    <!-- Before API 31 there is no CompanionDeviceService, and up to API 32 the system doesn't keep it bound,
+         so the manifest receiver applies the preferred codec -->
     <bool name="legacy_receiver_enabled">true</bool>
 </resources>

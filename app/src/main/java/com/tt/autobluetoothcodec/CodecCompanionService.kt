@@ -15,8 +15,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 
 /**
- * Applies the preferred codec of observed devices, see [CompanionPresence]. The system keeps this
- * service bound while such a device is present, which keeps the process out of the background.
+ * Applies the preferred codec of observed devices, see [CompanionPresence]. Since API 33 the system
+ * keeps this service bound while such a device is present, which keeps the process out of the
+ * background. On API 31 and 32 it only binds it for the callbacks, so A2DP connecting later is
+ * handled by [A2dpConnectReceiver] there.
  *
  * A device appears as soon as its Bluetooth link connects, usually before A2DP is connected. So
  * while a device is present, a runtime receiver waits for A2DP to connect. Unlike the manifest

@@ -122,14 +122,17 @@ class CompanionPresenceTest {
     }
 
     @Test
-    @Config(sdk = [28, 31, 36])
-    fun theReceiverIsEnabledOnlySince31WithoutTheFeature() {
+    @Config(sdk = [28, 31, 32, 33, 36])
+    fun theReceiverIsEnabledUpTo32AndWithoutTheFeature() {
+        // Up to API 32 the system doesn't keep the companion service bound while the device is present
+        assertEquals(sdk < 33, context.resources.getBoolean(R.bool.legacy_receiver_enabled))
         CompanionPresence.syncAll(context)
-        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, receiverState)
+        val withFeature = if (sdk in 31..32) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        assertEquals(withFeature, receiverState)
         setCompanionFeature(false)
         CompanionPresence.syncAll(context)
-        val expected = if (sdk >= 31) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
-        assertEquals(expected, receiverState)
+        val withoutFeature = if (sdk >= 31) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+        assertEquals(withoutFeature, receiverState)
     }
 
     @Test

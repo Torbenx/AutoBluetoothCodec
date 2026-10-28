@@ -53,7 +53,7 @@
                 <action android:name="android.companion.CompanionDeviceService"/>
             </intent-filter>
         </service>
-        <!-- Disabled since API 31 by values-v31, CompanionPresence enables it again if needed -->
+        <!-- Disabled since API 33 by values-v33, CompanionPresence enables it again if needed -->
         <receiver
             android:name=".A2dpConnectReceiver"
             android:enabled="@bool/legacy_receiver_enabled"

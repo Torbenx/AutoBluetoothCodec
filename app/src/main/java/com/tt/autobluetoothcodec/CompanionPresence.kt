@@ -13,9 +13,10 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 
 /**
- * Since API 31 the system binds [CodecCompanionService] while an observed device is present. A
- * device is observed while it's associated and has a preferred codec. Phones without the companion
- * device feature use [A2dpConnectReceiver] instead, like before API 31.
+ * Since API 31 the system binds [CodecCompanionService] when an observed device appears, and since
+ * API 33 keeps it bound while the device is present. A device is observed while it's associated and
+ * has a preferred codec. Phones without the companion device feature use [A2dpConnectReceiver]
+ * instead, like before API 31, and so do API 31 and 32 for A2DP connecting after the device appeared.
  */
 object CompanionPresence {
     private const val TAG = "CompanionPresence"
@@ -106,11 +107,11 @@ object CompanionPresence {
     }
 
     /**
-     * The manifest enables the receiver only before API 31. Since then it's still needed on phones
+     * The manifest enables the receiver only before API 33. Since then it's still needed on phones
      * without the companion device feature.
      */
     private fun updateReceiverEnabled(context: Context) {
-        val needed = Build.VERSION.SDK_INT >= 31 && !PermissionUtil.canAssociate(context)
+        val needed = Build.VERSION.SDK_INT >= 31 && (Build.VERSION.SDK_INT < 33 || !PermissionUtil.canAssociate(context))
         context.packageManager.setComponentEnabledSetting(
             ComponentName(context, A2dpConnectReceiver::class.java),
             if (needed) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,

@@ -16,8 +16,10 @@ import androidx.core.content.IntentCompat
  * doesn't put the receiving app on the temporary allowlist, so starting a service from here would
  * be refused in the background. The work is done within the broadcast via [goAsync] instead.
  *
- * Since API 31 [CodecCompanionService] does this, the receiver is only enabled there on phones
- * without the companion device feature, see [CompanionPresence.syncAll].
+ * Since API 33 [CodecCompanionService] does this, the receiver is only enabled there on phones
+ * without the companion device feature, see [CompanionPresence.syncAll]. On API 31 and 32 the
+ * system only binds the service for its callbacks, so its process is usually gone when A2DP
+ * connects after the device appeared, and the receiver stays enabled.
  */
 class A2dpConnectReceiver : BroadcastReceiver() {
     companion object {
