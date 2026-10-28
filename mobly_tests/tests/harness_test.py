@@ -63,6 +63,19 @@ class BtOracleTest(unittest.TestCase):
         codec = bt_oracle.Codec(bt_oracle.LDAC, 0x8, 0x2, codec_specific1=13)
         self.assertEqual(codec, bt_oracle.Codec.from_app(codec.to_app()))
 
+    def test_codecsToChangeTo(self):
+        capabilities = bt_oracle.parse(read("bluetooth_manager", "api36_connected.txt")).device(QUDELIX).capabilities
+        outside = bt_oracle.codec_outside(capabilities)
+        self.assertEqual(bt_oracle.OPUS, outside.codec_type)
+        self.assertFalse(any(c.codec_type == outside.codec_type for c in capabilities))
+        only_sbc = (bt_oracle.Capability(bt_oracle.SBC, 0x3, 0x1),)
+        self.assertEqual(bt_oracle.Codec(bt_oracle.OPUS, 0x2, 0x1), bt_oracle.codec_outside(only_sbc))
+        ldac = bt_oracle.Codec(bt_oracle.LDAC, 0x8, 0x4)
+        self.assertEqual(bt_oracle.Codec(bt_oracle.SBC, 0x1, 0x1), bt_oracle.other_codec(ldac))
+        self.assertEqual(bt_oracle.LDAC, bt_oracle.other_codec(bt_oracle.Codec(bt_oracle.SBC, 0x1, 0x1), capabilities).codec_type)
+        self.assertTrue(bt_oracle.same_format(ldac, bt_oracle.Codec(bt_oracle.LDAC, 0x8, 0x4, codec_specific1=1003)))
+        self.assertFalse(bt_oracle.same_format(ldac, None))
+
 
 class CompanionTest(unittest.TestCase):
     def test_listUpTo35(self):

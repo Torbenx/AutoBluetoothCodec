@@ -117,6 +117,41 @@ class A2dpState:
         return self.active_device is not None and same_device(self.active_device, address)
 
 
+def same_format(a, b):
+    """Whether both have the same codec, rate and size, the options aside. None matches nothing."""
+    return a is not None and b is not None and         (a.codec_type, a.sample_rate, a.bits_per_sample) == (b.codec_type, b.sample_rate, b.bits_per_sample)
+
+
+def other_codec(current, capabilities=()):
+    """A codec to change to from [current]: SBC 44.1 kHz, 16-bit, which every headset has (D11), or
+    where [current] is SBC the first other codec of [capabilities]."""
+    if current is None or current.codec_type != SBC:
+        return Codec(SBC, 0x1, 0x1)
+    for capability in capabilities:
+        if capability.codec_type != SBC and capability.codec_type in CODEC_NAMES:
+            rate = next(r for r in SAMPLE_RATES if capability.sample_rates & r)
+            bits = next(b for b in BITS_PER_SAMPLE if capability.bits_per_sample & b)
+            return Codec(capability.codec_type, rate, bits)
+    raise ValueError(f"no codec other than {current} in {capabilities}")
+
+
+def codec_outside(capabilities):
+    """A codec the app knows but the device doesn't offer, so applying it never verifies.
+
+    Preferably a codec type the device lacks, otherwise a sample rate one of its codecs lacks.
+    """
+    offered = {c.codec_type for c in capabilities}
+    for codec_type in (OPUS, APTX_HD, APTX, AAC, LDAC):
+        if codec_type not in offered:
+            return Codec(codec_type, 0x2, 0x1)
+    for capability in capabilities:
+        for rate in SAMPLE_RATES:
+            if not capability.sample_rates & rate:
+                bits = next(b for b in BITS_PER_SAMPLE if capability.bits_per_sample & b)
+                return Codec(capability.codec_type, rate, bits)
+    raise ValueError(f"the device offers everything: {capabilities}")
+
+
 def same_device(dumped, address):
     """Whether an address from the dump is [address]; masked parts match anything."""
     dumped, address = dumped.upper(), address.upper()

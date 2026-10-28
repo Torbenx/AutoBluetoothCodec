@@ -6,6 +6,7 @@ and one Headset, see testbed.yaml.
 
 import pathlib
 import shutil
+import time
 
 from mobly import asserts
 from mobly import base_test
@@ -34,6 +35,9 @@ class DeviceTest(base_test.BaseTestClass):
     def setup_test(self):
         self._logcat_since = device_state.shell(self.adb, "date +'%m-%d %H:%M:%S.000'")
         self._artifacts = None
+        # What the log may have at the end of the test, see check_invariants()
+        self.allowed_open = 0
+        self.allowed_interrupted = 0
 
     def require(self, condition, reason):
         """Skips the test unless the phone or headset can do what it needs."""
@@ -54,6 +58,24 @@ class DeviceTest(base_test.BaseTestClass):
 
     def on_skip(self, record):
         self.on_pass(record)
+
+    def check_invariants(self, settle=10.0):
+        """The log's problems at the end of a test, 6.5: its structure, open and interrupted
+        operations, and crashes of the app. Waits up to [settle] s for operations to resolve."""
+        end = time.time() + settle
+        while True:
+            events = self.log.read()
+            problems = app_log.check_structure(events, allow_open=self.allowed_open)
+            if not problems or time.time() >= end:
+                break
+            time.sleep(1)
+        interrupted = [e["seq"] for e in events if e["type"] == "OPERATION_INTERRUPTED"]
+        if len(interrupted) > self.allowed_interrupted:
+            problems.append(f"operations interrupted at seq {interrupted}")
+        crashes = device_state.shell(self.adb, f"logcat -d -b crash -T '{self._logcat_since}'", timeout=30)
+        if app.PACKAGE in crashes:
+            problems.append("the app crashed, see the crash buffer in logcat.txt")
+        return problems
 
     def collect_artifacts(self):
         """Saves what helps to understand a failure: log, Logcat, dumps, screen, headset."""
@@ -111,18 +133,23 @@ class BaselineTest(DeviceTest):
 
     def setup_test(self):
         super().setup_test()
-        problems = self.baseline.check()
+        try:
+            problems = self.baseline.check()
+            if problems:
+                self.leaks.append((self._previous_test, problems))
+                self.ad.log.warning("the baseline was left broken by %s: %s", self._previous_test, problems)
+                problems = self.baseline.restore()
+        except Exception as e:
+            # Like a part that can't be restored, for example a headset that doesn't answer
+            problems = [repr(e)]
         if problems:
-            self.leaks.append((self._previous_test, problems))
-            self.ad.log.warning("the baseline was left broken by %s: %s", self._previous_test, problems)
-            remaining = self.baseline.restore()
-            if remaining:
-                asserts.abort_class(f"the baseline can't be restored: {remaining}")
+            asserts.abort_class(f"the baseline can't be restored: {problems}")
 
     def teardown_test(self):
         self._previous_test = self.current_test_info.name
         # Mobly only calls on_fail after the teardown, when the restore has reset the app
         self.collect_artifacts()
+        invariants = self.check_invariants()
         try:
             remaining = self.baseline.restore()
             if remaining:
@@ -130,6 +157,8 @@ class BaselineTest(DeviceTest):
         except Exception:
             # The next test's check reports it as a leak
             self.ad.log.exception("restoring the baseline after %s failed", self._previous_test)
+        if invariants:
+            raise signals.TestFailure(f"the log's invariants are broken: {invariants}")
 
     def teardown_class(self):
         if self.leaks:

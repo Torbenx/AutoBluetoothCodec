@@ -96,15 +96,24 @@ class QudelixHeadset(Headset):
             # The tool exits on errors, which must not end the test run
             raise RuntimeError(f"Qudelix: {e}") from None
 
+    # The 5K sometimes doesn't answer its mode query, for example while it reboots
+    STATUS_TIMEOUT = 20.0
+
     def status(self):
-        try:
-            device = self._q.open_device(wait=5.0)
-        except SystemExit as e:
-            raise RuntimeError(f"Qudelix: {e}") from None
-        try:
-            return self._q.MODE_NAMES.get(device.get_usb_dac_mode(), "unknown")
-        finally:
-            device.close()
+        end = time.time() + self.STATUS_TIMEOUT
+        while True:
+            try:
+                device = self._q.open_device(wait=5.0)
+            except SystemExit as e:
+                raise RuntimeError(f"Qudelix: {e}") from None
+            try:
+                return self._q.MODE_NAMES.get(device.get_usb_dac_mode(), "unknown")
+            except RuntimeError:
+                if time.time() >= end:
+                    raise
+            finally:
+                device.close()
+            time.sleep(1)
 
     def reconnect(self, adb):
         self._set("bt-off")

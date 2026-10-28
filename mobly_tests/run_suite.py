@@ -111,7 +111,11 @@ def run_mobly(config_path, suite, tests=None):
     runner = test_runner.TestRunner(log_dir=config.log_path, testbed_name=config.testbed_name)
     with runner.mobly_logger():
         for cls in test_classes(suite):
-            runner.add_test_class(config, cls, tests=tests)
+            # --test may name tests of several suites
+            own = [test for test in tests if hasattr(cls, test)] if tests else None
+            if tests and not own:
+                continue
+            runner.add_test_class(config, cls, tests=own)
         runner.run()
     # Mobly leaves the root logger at DEBUG, which would print every adb command from here on
     logging.getLogger().setLevel(logging.WARNING)
