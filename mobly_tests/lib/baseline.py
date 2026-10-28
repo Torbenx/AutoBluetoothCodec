@@ -11,7 +11,9 @@ Whether the app process runs isn't part of the baseline; restoring ends it,
 so no state survives in memory.
 """
 
+import html
 import re
+import time
 
 from lib import app
 from lib import app_log
@@ -22,6 +24,8 @@ from lib import device_state
 # Flags a user's choice leaves on the permission, the reset clears them
 USER_FLAGS = {"USER_SET", "USER_FIXED"}
 CONNECT_TIMEOUT = 40.0
+# After a reconnect the Qudelix pages the phone it served last for up to a minute, refusing others
+SETTINGS_TIMEOUT = 90.0
 
 
 def foreground_activity(adb):
@@ -36,11 +40,50 @@ def preferred_codecs(adb):
     return re.findall(r'<string name="([^"]+)"', out)
 
 
+def element_bounds(xml, text):
+    """The center of the first element of a UiAutomator dump that shows [text], or None.
+
+    Ignores the direction marks the S24's Bluetooth settings put around device names.
+    """
+    for node in re.findall(r"<node [^>]*>", xml):
+        shown = re.search(r'text="([^"]*)"', node)
+        bounds = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if shown and bounds and html.unescape(shown.group(1)).strip("\u200e\u200f") == text:
+            x1, y1, x2, y2 = map(int, bounds.groups())
+            return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
+
+
+def connect_from_settings(adb, headset, timeout=SETTINGS_TIMEOUT):
+    """Taps the headset in the phone's Bluetooth settings until A2DP connects (D16)."""
+    device_state.shell(adb, "am start -a android.settings.BLUETOOTH_SETTINGS")
+    end = time.time() + timeout
+    try:
+        while True:
+            xml = device_state.shell(
+                adb, "uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1; cat /data/local/tmp/ui.xml", timeout=30)
+            center = element_bounds(xml, headset.name)
+            if center:
+                device_state.shell(adb, f"input tap {center[0]} {center[1]}")
+            try:
+                bt_oracle.wait_connected(adb, headset.address, timeout=min(20.0, max(1.0, end - time.time())))
+                return
+            except TimeoutError:
+                if time.time() >= end:
+                    raise TimeoutError(f"{headset.name} didn't connect from the Bluetooth settings"
+                                       + ("" if center else ", it isn't listed")) from None
+    finally:
+        app.go_home(adb)
+
+
 def connect(adb, headset, timeout=CONNECT_TIMEOUT):
-    """The connect fixture, 6.6: done once A2DP connects, else one reconnect of the headset.
+    """The connect fixture, 6.6: done once A2DP connects, else one reconnect of the headset, else
+    a tap on it in the phone's Bluetooth settings.
 
     It waits a little first: after the phone's Bluetooth or the headset's A2DP
-    comes back, A2DP connects on its own within seconds.
+    comes back, A2DP connects on its own within seconds. A phone that the
+    headset didn't serve last, like the S24 after a Pixel's run, needs the
+    tap.
     """
     if not device_state.is_bluetooth_on(adb):
         device_state.set_bluetooth(adb, True)
@@ -50,7 +93,12 @@ def connect(adb, headset, timeout=CONNECT_TIMEOUT):
     except TimeoutError:
         pass
     headset.reconnect(adb)
-    bt_oracle.wait_connected(adb, headset.address, timeout=timeout)
+    try:
+        bt_oracle.wait_connected(adb, headset.address, timeout=timeout)
+        return
+    except TimeoutError:
+        pass
+    connect_from_settings(adb, headset)
 
 
 class Baseline:

@@ -532,23 +532,26 @@ it on for the phone under test. The fixture:
 
 1. Checks `dumpsys`, done if connected.
 2. Calls the backend's `reconnect()`, then waits.
-3. Fails with diagnostics.
+3. Taps the headset by name in the phone's Bluetooth settings, through a
+   UiAutomator dump and `input tap`, until it connects (D16).
+4. Fails with diagnostics.
 
 The sanity checks (6.9) make sure step 2 works for a phone before its tests
 start.
 
 When Bluetooth turns on, a Pixel only connects on its own to its most recently
 active A2DP device, and after a `cycle` the Qudelix only reconnects to the
-phone it served last. So each phone has to connect to the headset once from
-its Bluetooth settings, as part of preparing it. After that, turning a Pixel's
-Bluetooth on connects within 6–8 s, whichever phone the Qudelix served before.
+phone it served last. After one connect from its Bluetooth settings, turning a
+Pixel's Bluetooth on connects within 6–8 s, whichever phone the Qudelix served
+before.
 
 The S24 never connects on its own when its Bluetooth is turned on over adb. A
 `cycle` reconnects it, but only if it was the last phone the Qudelix served.
-So after a Pixel's run, the S24 needs one connect started from the S24 again
-(an open question, see the end of section 13). The fixture waits 15 s after
-Bluetooth turns on, then reconnects the headset once; the sanity check uses
-the same fixture.
+So after a Pixel's run, step 3 connects it from its settings. After a cycle
+the Qudelix pages its last phone for up to a minute and refuses others, so
+the taps go on for 90 s. The fixture waits 15 s after Bluetooth turns on,
+then reconnects the headset once, then taps; the sanity check uses the same
+fixture. On the S24 after a Pixel's run it took 99 s.
 
 Fixture steps like these are retried; assertions never are. A test that fails
 is rerun by hand or with a flag, and tests known to be flaky are listed with
@@ -577,8 +580,8 @@ dump, and the headset's status.
 ### 6.9 Running
 
 Prepared once per phone, outside the suite: developer options and USB
-debugging on, the headsets paired and connected once from the phone's
-Bluetooth settings (6.6). Saving and restoring a phone's own app data,
+debugging on, the headsets paired with the phone; the connect fixture
+connects them (6.6). Saving and restoring a phone's own app data,
 like the S24's, is outside the suite too (D7).
 
 1. Start `testbed_session.py` in one terminal.
@@ -977,21 +980,10 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   Bluetooth off, and warns when one is locked. The suite doesn't change these
   settings; it runs sanity checks and fails early (6.9). The phones, the S24
   included, are unlocked during a run.
+- **D16** When reconnecting the headset doesn't connect it, the connect
+  fixture taps it in the phone's Bluetooth settings (6.6).
 
 ### Open
-
-**D16. How does the S24 get connected after a Pixel's run?** It doesn't
-connect on its own when its Bluetooth turns on, and a Qudelix `cycle` only
-reconnects the phone the Qudelix served last (6.6).
-- (a) The connect fixture taps the headset by name in the phone's Bluetooth
-  settings with UiAutomator, when Bluetooth on and one reconnect didn't
-  connect it. Works the same on the Pixels and the S24, needs the phone
-  unlocked, which it is during a run.
-- (b) You connect the S24 by hand before its run; the sanity check fails
-  until then.
-- (c) The S24 always runs first, which still needs (b) after a Pixel's run.
-
-*Recommendation:* (a).
 
 **D17. Should the preferred codec be applied when the process was killed
 while the device was present?** On API 36 the system doesn't start the app

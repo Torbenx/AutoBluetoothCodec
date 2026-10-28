@@ -7,7 +7,7 @@
 import pathlib
 import unittest
 
-from lib import app, app_log, bt_oracle, companion
+from lib import app, app_log, baseline, bt_oracle, companion
 
 TESTDATA = pathlib.Path(__file__).resolve().parents[1] / "testdata"
 SAMPLE_LOG = pathlib.Path(__file__).resolve().parents[2] / "app/src/sharedTest/resources/sample_event_log.jsonl"
@@ -75,6 +75,16 @@ class BtOracleTest(unittest.TestCase):
         self.assertEqual(bt_oracle.LDAC, bt_oracle.other_codec(bt_oracle.Codec(bt_oracle.SBC, 0x1, 0x1), capabilities).codec_type)
         self.assertTrue(bt_oracle.same_format(ldac, bt_oracle.Codec(bt_oracle.LDAC, 0x8, 0x4, codec_specific1=1003)))
         self.assertFalse(bt_oracle.same_format(ldac, None))
+
+
+class BaselineTest(unittest.TestCase):
+    def test_elementBoundsIgnoresDirectionMarks(self):
+        xml = ('<hierarchy><node text="Gekoppelte Ger&#228;te" bounds="[0,100][1080,160]" />'
+               '<node text="\u200eQudelix-5K\u200e" bounds="[160,620][700,680]" />'
+               '<node text="R&amp;D Buds" bounds="[160,700][700,760]" /></hierarchy>')
+        self.assertEqual((430, 650), baseline.element_bounds(xml, "Qudelix-5K"))
+        self.assertEqual((430, 730), baseline.element_bounds(xml, "R&D Buds"))
+        self.assertIsNone(baseline.element_bounds(xml, "Qudelix"))
 
 
 class CompanionTest(unittest.TestCase):

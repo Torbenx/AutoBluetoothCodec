@@ -45,8 +45,9 @@ def connect_problems(adb, headset):
     """Turns the phone's Bluetooth on and checks that the headset connects over A2DP.
 
     Uses the connect fixture: the Pixels connect on their own when Bluetooth
-    turns on, the S24 only when the headset reconnects to it, which works
-    only if it was the last phone the headset was connected to.
+    turns on, the S24 when the headset reconnects to it, which works only if
+    it was the last phone the headset was connected to, or else from its
+    Bluetooth settings.
     """
     device_state.set_bluetooth(adb, True)
     if not is_bonded(adb, headset.address):
@@ -54,6 +55,6 @@ def connect_problems(adb, headset):
     try:
         baseline.connect(adb, headset)
     except TimeoutError:
-        return [f"{headset.name} didn't connect over A2DP, neither when Bluetooth turned on nor after it "
-                "reconnected; connect it once from the phone's Bluetooth settings"]
+        return [f"{headset.name} didn't connect over A2DP, neither when Bluetooth turned on, nor after it "
+                "reconnected, nor from the phone's Bluetooth settings"]
     return []
