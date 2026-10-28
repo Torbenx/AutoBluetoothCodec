@@ -24,7 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
-/** K1 and K2 of the test concept: the resolutions of a request and how requests are coordinated. */
+/** K1 to K3 of the test concept: the resolutions of a request, how requests are coordinated, the profile proxy. */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [33])
 class CodecApplierTest {
@@ -274,5 +274,53 @@ class CodecApplierTest {
         assertEquals(EventType.CODEC_VERIFIED, otherDone.only)
         assertEquals(1, resolution(operation.uid)!!.attempt)
         assertEquals(3, resolution(other.uid)!!.attempt)
+    }
+
+    @Test
+    fun theProfileIsRequestedOnceAndKept() {
+        a2dp.connectsAutomatically = false
+        val (_, first) = apply(sbc())
+        val (_, other) = apply(ldac(), OTHER_ADDRESS)
+        assertEquals(1, a2dp.connectCount)
+        a2dp.connectProfile()
+        runFor(600)
+        assertEquals(EventType.CODEC_VERIFIED, first.only)
+        assertEquals(EventType.CODEC_VERIFIED, other.only)
+        // Kept open after the requests
+        val (_, later) = apply(ldac())
+        runFor(600)
+        assertEquals(EventType.CODEC_VERIFIED, later.only)
+        assertEquals(1, a2dp.connectCount)
+        assertEquals(0, a2dp.closeCount)
+    }
+
+    @Test
+    fun aDisconnectWhileIdleClosesTheProfileAndTheNextRequestOpensIt() {
+        val (_, first) = apply(sbc())
+        runFor(600)
+        assertEquals(EventType.CODEC_VERIFIED, first.only)
+        // Like Bluetooth turning off (manual 2.3)
+        a2dp.disconnectProfile()
+        assertEquals(1, a2dp.closeCount)
+        a2dp.isBluetoothEnabled = false
+        val (_, off) = apply(ldac())
+        assertEquals(EventType.PROFILE_UNAVAILABLE, off.only)
+        assertEquals(1, a2dp.connectCount)
+        a2dp.isBluetoothEnabled = true
+        val (_, on) = apply(ldac())
+        runFor(600)
+        assertEquals(EventType.CODEC_VERIFIED, on.only)
+        assertEquals(2, a2dp.connectCount)
+        assertEquals(1, a2dp.closeCount)
+    }
+
+    @Test
+    fun resettingTheApplierClosesTheProfile() {
+        val (_, done) = apply(sbc())
+        runFor(600)
+        assertEquals(EventType.CODEC_VERIFIED, done.only)
+        CodecApplier.resetForTest(context)
+        assertEquals(1, a2dp.closeCount)
+        assertFalse(a2dp.isProfileConnected)
     }
 }

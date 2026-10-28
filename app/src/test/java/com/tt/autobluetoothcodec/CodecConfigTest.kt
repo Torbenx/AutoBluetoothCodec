@@ -133,6 +133,25 @@ class CodecConfigTest {
     }
 
     @Test
+    fun equals_comparesTheOptionsOfEveryCodec() {
+        val aac = config(android(CodecConfig.CODEC_TYPE_AAC, codecSpecific1 = 128 + AACCodecConfig.VARIABLE_BITRATE_HIGH))
+        val sameAac = AACCodecConfig().also {
+            it.sampleRate = CodecConfig.SAMPLE_RATE_44100
+            it.bitsPerSample = CodecConfig.BITS_PER_SAMPLE_16
+            it.variableBitrate = AACCodecConfig.VARIABLE_BITRATE_HIGH
+        }
+        assertEquals(aac, sameAac)
+        assertEquals(aac.hashCode(), sameAac.hashCode())
+        assertNotEquals(aac, config(android(CodecConfig.CODEC_TYPE_AAC)))
+        val opus = config(android(CodecConfig.CODEC_TYPE_OPUS, codecSpecific3 = 17))
+        assertEquals(opus, config(android(CodecConfig.CODEC_TYPE_OPUS, codecSpecific3 = 17)))
+        assertNotEquals(opus, config(android(CodecConfig.CODEC_TYPE_OPUS, codecSpecific3 = 18)))
+        // The stack's own LDAC values read as the bitrate they stand for
+        assertEquals(ldac(LDACCodecConfig.BITRATE_HIGH),
+            config(android(CodecConfig.CODEC_TYPE_LDAC, CodecConfig.SAMPLE_RATE_96000, CodecConfig.BITS_PER_SAMPLE_24, 1000)))
+    }
+
+    @Test
     fun clone_isIndependent() {
         val original = ldac(LDACCodecConfig.BITRATE_LOW)
         val clone = original.clone() as LDACCodecConfig
