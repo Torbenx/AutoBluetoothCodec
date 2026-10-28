@@ -76,6 +76,13 @@ class ColdStartTest(BaselineTest):
                 asserts.fail(f"{codec} wasn't applied within {timeout:.0f} s, dumpsys shows {dumped}: {self.describe(ops)}")
             time.sleep(1)
 
+    def check_one_appearance(self, ops):
+        """Since API 36 the service counts a device present while any source sees it (D18), so a
+        reconnect is one appearance, not one per source."""
+        if self.sdk >= 36:
+            appeared = [op for op in ops if op.trigger["type"] == "DEVICE_APPEARED"]
+            asserts.assert_equal(1, len(appeared), f"appearances: {self.describe(ops)}")
+
     def resolved_after(self, seq):
         return [op for op in app_log.operations(self.log.events_after(seq)) if op.resolution]
 
@@ -144,6 +151,7 @@ class ColdStartTest(BaselineTest):
                 asserts.fail(f"the manifest receiver didn't handle A2DP connecting: {self.describe(ops)}")
             time.sleep(1)
         self.ad.log.info("C1: %s", self.describe(ops))
+        self.check_one_appearance(ops)
 
     def test_c2_app_in_front_applies_on_reconnect(self):
         """The same with the main screen open (manual 2.1)."""
@@ -154,6 +162,7 @@ class ColdStartTest(BaselineTest):
         self.headset.reconnect(self.adb)
         ops = self.wait_for_applied(mark, codec)
         self.ad.log.info("C2 in front: %s", self.describe(ops))
+        self.check_one_appearance(ops)
 
     def test_c2_app_in_background_applies_on_reconnect(self):
         """The same with the process alive in the background."""
@@ -166,6 +175,7 @@ class ColdStartTest(BaselineTest):
         self.headset.reconnect(self.adb)
         ops = self.wait_for_applied(mark, codec)
         self.ad.log.info("C2 in background: %s", self.describe(ops))
+        self.check_one_appearance(ops)
 
     def test_c3_killed_while_present_then_a2dp_connects(self):
         """Characterization: the process is killed while the device is present with A2DP down, then A2DP connects."""

@@ -2,7 +2,7 @@
 
 How Auto Bluetooth Codec is tested: which test levels exist, what each one
 covers, which information and control channels they use, what the harness
-needs, and in which order it's built. The decisions behind it, D1 to D15, are
+needs, and in which order it's built. The decisions behind it, D1 to D18, are
 listed in [section 13](#13-decisions) and referenced where they matter.
 
 Two manual test records, `tools/codec-applier-tests.md` and
@@ -239,7 +239,7 @@ levels and fakes that a phone can't provide.
 | K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request | P1 |
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
-| K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3) | P1 |
+| K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |
 | K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
 | K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
@@ -920,9 +920,10 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   stopped state on the S24.
 - The S24 reports the headset's presence from two sources: it appears twice, a
   second apart, when the headset comes on, and disappears twice. Without A2DP
-  it also reports the headset gone and back every minute or two (C13). The
-  service keeps one set of present devices, so the first disappearance removes
-  the headset and cancels a running request, see D18.
+  it also reports the headset gone and back every minute or two (C13). Since
+  D18 the service counts it present while any source sees it: a reconnect is
+  one appearance (C1, C2). Without A2DP, BLE is the only source, and its gaps
+  remain.
 - Play Protect asked again for the snippet APK of a new build. The install
   timeout stopped the run with its message, and declining the upload let the
   install finish. Since then its option to send unknown apps is off on the
@@ -990,21 +991,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   preferred codec is also applied when A2DP connects while the companion
   service doesn't run (C3). When both apply it, the second request resolves
   `ALREADY_PENDING`.
-
-### Open
-
-**D18. Should the service track presence per source on API 36?** The S24
-reports the headset from two sources and reports it gone and back while it's
-on (section 12). `CodecCompanionService` keeps one set of present addresses:
-the first `onDeviceDisappeared` removes the device and cancels its request,
-even while the other source still reports it. If A2DP connects in such a gap,
-the preferred codec isn't applied, and a request running at the time is
-cancelled. Not reproduced yet; C13 shows the gaps without A2DP.
-- (a) Use `onDevicePresenceEvent` on API 36 and count a device present while
-  any source reports it. A test with A2DP connecting during a gap would show
-  the difference.
-- (b) Keep it; a later reconnect applies the codec.
-
-*Recommendation:* (a), after a test that reproduces the gap with A2DP
-connecting.
-
+- **D18** Since API 36 the service follows `onDevicePresenceEvent` and counts
+  a device present while any source reports it; the String callbacks are
+  ignored there, since the system calls them once per source. A gap with A2DP
+  connecting can't be reproduced on demand, the gaps come at random times, so
+  the component tests (K5) cover it; C1 and C2 check one appearance per
+  reconnect on API 36.

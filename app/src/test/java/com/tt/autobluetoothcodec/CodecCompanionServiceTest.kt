@@ -3,6 +3,8 @@ package com.tt.autobluetoothcodec
 import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothProfile
+import android.companion.CompanionDeviceManager
+import android.companion.DevicePresenceEvent
 import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tt.autobluetoothcodec.TestSupport.ADDRESS
@@ -17,6 +19,7 @@ import com.tt.autobluetoothcodec.TestSupport.runFor
 import com.tt.autobluetoothcodec.TestSupport.runPending
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -25,6 +28,7 @@ import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
 import org.robolectric.annotation.Config
+import org.robolectric.shadow.api.Shadow
 
 /** K5 of the test concept: the service the system binds while an observed device is present. */
 @RunWith(AndroidJUnit4::class)
@@ -58,6 +62,18 @@ class CodecCompanionServiceTest {
 
     /** The operations the service started, by trigger. */
     private fun operations(type: EventType) = events.filter { it.type == type }
+
+    /** Links [ADDRESS] like the companion device manager since API 33, and returns the association's id. */
+    private fun link(): Int {
+        val companionManager = context.getSystemService(CompanionDeviceManager::class.java)
+        Shadow.extract<ObservingCompanionDeviceManager>(companionManager).addAssociation(ADDRESS.lowercase())
+        return companionManager.myAssociations.single().id
+    }
+
+    private fun presence(associationId: Int, event: Int) {
+        service.onDevicePresenceEvent(DevicePresenceEvent(associationId, event, null))
+        runFor(600)
+    }
 
     @Test
     fun noPreferredCodecResolvesWithoutReceiver() {
@@ -136,5 +152,56 @@ class CodecCompanionServiceTest {
         a2dpConnected(ADDRESS)
         runFor(600)
         assertTrue(operations(EventType.A2DP_CONNECTED).none { it.message == "companion service" })
+    }
+
+    @Test
+    @Config(sdk = [36], shadows = [ObservingCompanionDeviceManager::class])
+    fun twoSourcesAreOneAppearance() {
+        PreferredCodecStore.set(context, device(), sbc())
+        val id = link()
+        presence(id, DevicePresenceEvent.EVENT_BT_CONNECTED)
+        presence(id, DevicePresenceEvent.EVENT_BLE_APPEARED)
+        val appeared = operations(EventType.DEVICE_APPEARED).single()
+        assertEquals("Bluetooth", appeared.message)
+        assertEquals(EventType.CODEC_VERIFIED, resolution(appeared.opUID!!)!!.type)
+    }
+
+    @Test
+    @Config(sdk = [36], shadows = [ObservingCompanionDeviceManager::class])
+    fun theDeviceStaysPresentWhileOneSourceSeesIt() {
+        PreferredCodecStore.set(context, device(), sbc())
+        val id = link()
+        presence(id, DevicePresenceEvent.EVENT_BLE_APPEARED)
+        presence(id, DevicePresenceEvent.EVENT_BT_CONNECTED)
+        // A BLE gap, like the S24 reports every minute or two
+        presence(id, DevicePresenceEvent.EVENT_BLE_DISAPPEARED)
+        assertTrue(operations(EventType.DEVICE_DISAPPEARED).isEmpty())
+        a2dpConnected(ADDRESS)
+        runFor(600)
+        val connected = operations(EventType.A2DP_CONNECTED).single { it.message == "companion service" }
+        assertEquals(EventType.CODEC_VERIFIED, resolution(connected.opUID!!)!!.type)
+        presence(id, DevicePresenceEvent.EVENT_BT_DISCONNECTED)
+        assertEquals("Bluetooth", operations(EventType.DEVICE_DISAPPEARED).single().message)
+        // Gone from both, it appears again with the next source
+        presence(id, DevicePresenceEvent.EVENT_BLE_APPEARED)
+        assertEquals(listOf("BLE", "BLE"), operations(EventType.DEVICE_APPEARED).map { it.message })
+    }
+
+    @Test
+    @Config(sdk = [36], shadows = [ObservingCompanionDeviceManager::class])
+    fun theStringCallbacksAreIgnoredSince36() {
+        PreferredCodecStore.set(context, device(), sbc())
+        service.onDeviceAppeared(ADDRESS)
+        service.onDeviceDisappeared(ADDRESS)
+        assertTrue(operations(EventType.DEVICE_APPEARED).isEmpty())
+        assertTrue(operations(EventType.DEVICE_DISAPPEARED).isEmpty())
+    }
+
+    @Test
+    @Config(sdk = [36], shadows = [ObservingCompanionDeviceManager::class])
+    fun eventsOfUnknownAssociationsAreIgnored() {
+        PreferredCodecStore.set(context, device(), sbc())
+        presence(42, DevicePresenceEvent.EVENT_BT_CONNECTED)
+        assertNull(events.firstOrNull { it.type == EventType.DEVICE_APPEARED })
     }
 }

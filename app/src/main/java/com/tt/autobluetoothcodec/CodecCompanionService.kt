@@ -4,11 +4,14 @@ import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.companion.CompanionDeviceManager
 import android.companion.CompanionDeviceService
+import android.companion.DevicePresenceEvent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
@@ -24,8 +27,11 @@ import androidx.core.content.IntentCompat
  * while a device is present, a runtime receiver waits for A2DP to connect. Unlike the manifest
  * receiver it doesn't queue up behind other apps' receivers.
  *
- * Only the String callbacks are overridden: they exist since API 31, the AssociationInfo variants
- * forward to them, and since API 36 the system still calls those next to onDevicePresenceEvent.
+ * Up to API 35 only the String callbacks are overridden: they exist since API 31, and the
+ * AssociationInfo variants forward to them. Since API 36 the system calls them for each source a
+ * device is seen on, BLE and its Bluetooth connection, and reports one source going while the other
+ * stays. So there the service follows [onDevicePresenceEvent] instead, and a device is present while
+ * any source reports it.
  */
 @RequiresApi(31)
 class CodecCompanionService : CompanionDeviceService() {
@@ -35,6 +41,8 @@ class CodecCompanionService : CompanionDeviceService() {
 
     private val applier by lazy { CodecApplier.get(this) }
     private val presentDevices = HashSet<String>()
+    // Since API 36 the sources each present device is seen on, see onDevicePresenceEvent
+    private val presenceSources = HashMap<String, MutableSet<String>>()
     private var receiverRegistered = false
 
     private val a2dpReceiver = object : BroadcastReceiver() {
@@ -52,9 +60,49 @@ class CodecCompanionService : CompanionDeviceService() {
 
     @Suppress("OVERRIDE_DEPRECATION")
     override fun onDeviceAppeared(address: String) {
+        if (Build.VERSION.SDK_INT < 36)
+            deviceAppeared(address, source = null)
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun onDeviceDisappeared(address: String) {
+        if (Build.VERSION.SDK_INT < 36)
+            deviceDisappeared(address, source = null)
+    }
+
+    @RequiresApi(36)
+    override fun onDevicePresenceEvent(event: DevicePresenceEvent) {
+        val (source, appeared) = when (event.event) {
+            DevicePresenceEvent.EVENT_BLE_APPEARED -> "BLE" to true
+            DevicePresenceEvent.EVENT_BLE_DISAPPEARED -> "BLE" to false
+            DevicePresenceEvent.EVENT_BT_CONNECTED -> "Bluetooth" to true
+            DevicePresenceEvent.EVENT_BT_DISCONNECTED -> "Bluetooth" to false
+            DevicePresenceEvent.EVENT_SELF_MANAGED_APPEARED -> "self-managed" to true
+            DevicePresenceEvent.EVENT_SELF_MANAGED_DISAPPEARED -> "self-managed" to false
+            else -> return
+        }
+        val address = getSystemService(CompanionDeviceManager::class.java).myAssociations
+            .firstOrNull { it.id == event.associationId }?.deviceMacAddress?.toString()?.uppercase()
+        if (address == null) {
+            Log.w(TAG, "presence event $event for an association that doesn't exist")
+            return
+        }
+        val sources = presenceSources.getOrPut(address) { HashSet() }
+        if (appeared) {
+            val first = sources.isEmpty()
+            if (sources.add(source) && first)
+                deviceAppeared(address, source)
+        } else if (sources.remove(source) && sources.isEmpty()) {
+            presenceSources.remove(address)
+            deviceDisappeared(address, source)
+        }
+    }
+
+    /** Since API 36 [source] is the one the device appeared on first. */
+    private fun deviceAppeared(address: String, source: String?) {
         val device = getDevice(address)
         val operation = EventLog.get(this).begin(EventType.DEVICE_APPEARED,
-            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()))
+            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()), message = source)
         if (device == null) {
             operation.resolve(EventType.ERROR, message = "no Bluetooth adapter")
             return
@@ -73,11 +121,11 @@ class CodecCompanionService : CompanionDeviceService() {
         applyCodec(device, operation)
     }
 
-    @Suppress("OVERRIDE_DEPRECATION")
-    override fun onDeviceDisappeared(address: String) {
+    /** Since API 36 [source] is the last one the device was seen on. */
+    private fun deviceDisappeared(address: String, source: String?) {
         val device = getDevice(address)
         EventLog.get(this).log(EventType.DEVICE_DISAPPEARED,
-            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()))
+            device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()), message = source)
         if (device == null)
             return
         presentDevices.remove(device.address)
