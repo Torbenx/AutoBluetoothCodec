@@ -1,5 +1,5 @@
 mobly==1.13.1
-# For the Qudelix headset backend, tools/qudelix5k.py
+# For the Qudelix headset backend
 hidapi
 # For the journeys, D4
 snippet-uiautomator==1.1.2

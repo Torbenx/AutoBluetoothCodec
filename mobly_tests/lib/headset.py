@@ -4,9 +4,8 @@ The headset is part of the testbed: testbed.yaml names it and its backend,
 and the same tests run with each. A backend offers what it can, tests that
 need more check `capabilities` and skip:
 
-  * qudelix: the Qudelix-5K over USB, see tools/qudelix5k.py. It can switch
-    A2DP alone (no-a2dp) and its Bluetooth (bt-off), so it has both
-    capabilities.
+  * qudelix: the Qudelix-5K over USB. It can switch A2DP alone (no-a2dp)
+    and its Bluetooth (bt-off), so it has both capabilities.
   * phone: any paired headset. Only the phone's Bluetooth adapter can be
     switched over adb, so it has neither capability (D14).
 
@@ -22,6 +21,7 @@ import sys
 import time
 
 from lib import device_state
+from lib import qudelix5k
 
 MOBLY_CONTROLLER_CONFIG_NAME = "Headset"
 
@@ -29,8 +29,6 @@ MOBLY_CONTROLLER_CONFIG_NAME = "Headset"
 A2DP_SWITCH = "a2dp_switch"
 # The device disappears and appears while the phone's Bluetooth stays on
 POWER_SWITCH = "power_switch"
-
-_TOOLS = pathlib.Path(__file__).resolve().parents[2] / "tools"
 
 
 class Headset:
@@ -82,16 +80,9 @@ class QudelixHeadset(Headset):
     # How long the 5K stays off in reconnect(), like `qudelix5k.py cycle`
     OFF_SECONDS = 5.0
 
-    def __init__(self, config):
-        super().__init__(config)
-        if str(_TOOLS) not in sys.path:
-            sys.path.insert(0, str(_TOOLS))
-        import qudelix5k
-        self._q = qudelix5k
-
     def _set(self, mode):
         try:
-            self._q.set_mode(mode, wait=15.0)
+            qudelix5k.set_mode(mode, wait=15.0)
         except SystemExit as e:
             # The tool exits on errors, which must not end the test run
             raise RuntimeError(f"Qudelix: {e}") from None
@@ -103,11 +94,11 @@ class QudelixHeadset(Headset):
         end = time.time() + self.STATUS_TIMEOUT
         while True:
             try:
-                device = self._q.open_device(wait=5.0)
+                device = qudelix5k.open_device(wait=5.0)
             except SystemExit as e:
                 raise RuntimeError(f"Qudelix: {e}") from None
             try:
-                return self._q.MODE_NAMES.get(device.get_usb_dac_mode(), "unknown")
+                return qudelix5k.MODE_NAMES.get(device.get_usb_dac_mode(), "unknown")
             except RuntimeError:
                 if time.time() >= end:
                     raise

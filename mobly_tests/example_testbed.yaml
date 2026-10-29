@@ -15,7 +15,7 @@ phones:
 headsets:
   # The key is the name to pick it with run_suite.py --headset
   qudelix:
-    # The Qudelix-5K over USB, see tools/qudelix5k.py
+    # The Qudelix-5K over USB
     backend: qudelix
     address: "00:11:22:33:44:55"
     name: Qudelix-5K

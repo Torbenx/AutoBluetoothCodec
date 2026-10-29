@@ -37,7 +37,7 @@ between the app and the system, which unit tests can't see.
 
 | Headset | Address | Controlled by |
 | --- | --- | --- |
-| Qudelix-5K | `0A:1B:2C:3D:4E:5F` | USB, [qudelix5k.py](tools/qudelix5k.py) |
+| Qudelix-5K | `0A:1B:2C:3D:4E:5F` | USB |
 | Any other headset | from the testbed config | The phone's Bluetooth adapter, see [6.3](#63-headsets) |
 
 The second Pixel is API 32 (build `SP2A.220505.008`), not 31. The app has no
