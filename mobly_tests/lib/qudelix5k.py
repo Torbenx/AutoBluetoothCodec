@@ -148,29 +148,47 @@ def set_mode(name, wait):
     finally:
         q.close()
     if current == MODES["bt-off"] and wait:
-        end = time.time() + 5
-        while find_path() and time.time() < end:
-            time.sleep(0.1)
-        print("device left USB" if not find_path() else "warning: device never left USB")
-        end = time.time() + wait
-        while True:
-            # Firmware re-enumerates on USB slightly before it answers commands.
+        wait_until_back(wait)
+
+
+def reboot(wait):
+    """Restarts the 5K in its current mode. The phone sees it go away and come
+    back, like switching it off and on."""
+    q = open_device()
+    try:
+        q.reboot()
+        print("rebooting")
+    finally:
+        q.close()
+    if wait:
+        wait_until_back(wait)
+
+
+def wait_until_back(wait):
+    """Waits for a rebooting 5K to leave USB and answer again, up to [wait] s."""
+    end = time.time() + 5
+    while find_path() and time.time() < end:
+        time.sleep(0.1)
+    print("device left USB" if not find_path() else "warning: device never left USB")
+    end = time.time() + wait
+    while True:
+        # Firmware re-enumerates on USB slightly before it answers commands.
+        try:
+            q = open_device(max(0.0, end - time.time()))
+        except (RuntimeError, OSError):
+            q = None
+        if q:
             try:
-                q = open_device(max(0.0, end - time.time()))
+                q.get_usb_dac_mode()
+                break
             except (RuntimeError, OSError):
-                q = None
-            if q:
-                try:
-                    q.get_usb_dac_mode()
-                    break
-                except (RuntimeError, OSError):
-                    pass
-                finally:
-                    q.close()
-            if time.time() >= end:
-                sys.exit("Qudelix-5K back on USB but not responding")
-            time.sleep(0.5)
-        print("device back on USB")
+                pass
+            finally:
+                q.close()
+        if time.time() >= end:
+            sys.exit("Qudelix-5K back on USB but not responding")
+        time.sleep(0.5)
+    print("device back on USB")
 
 
 def main():
@@ -193,9 +211,7 @@ def main():
         finally:
             q.close()
     elif args.cmd == "reboot":
-        q = open_device()
-        q.reboot()
-        q.close()
+        reboot(args.wait)
     elif args.cmd == "cycle":
         set_mode("bt-off", args.wait)
         time.sleep(args.off_seconds)

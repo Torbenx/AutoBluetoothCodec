@@ -77,14 +77,18 @@ class Headset:
 class QudelixHeadset(Headset):
     backend = "qudelix"
     capabilities = frozenset({A2DP_SWITCH, POWER_SWITCH})
-    # How long the 5K stays off in reconnect(), like `qudelix5k.py cycle`
-    OFF_SECONDS = 5.0
 
     def _set(self, mode):
         try:
             qudelix5k.set_mode(mode, wait=15.0)
         except SystemExit as e:
             # The tool exits on errors, which must not end the test run
+            raise RuntimeError(f"Qudelix: {e}") from None
+
+    def _reboot(self):
+        try:
+            qudelix5k.reboot(wait=15.0)
+        except SystemExit as e:
             raise RuntimeError(f"Qudelix: {e}") from None
 
     # The 5K sometimes doesn't answer its mode query, for example while it reboots
@@ -107,9 +111,11 @@ class QudelixHeadset(Headset):
             time.sleep(1)
 
     def reconnect(self, adb):
-        self._set("bt-off")
-        time.sleep(self.OFF_SECONDS)
+        # A reboot is a full reconnect on every phone, about 3 s sooner than bt-off, 5 s and
+        # normal (D21). It keeps the mode, so a headset left in another one, by an aborted run
+        # for example, is set to normal first.
         self._set("normal")
+        self._reboot()
 
     def disconnect_a2dp(self):
         self._set("no-a2dp")

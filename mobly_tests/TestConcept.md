@@ -110,7 +110,7 @@ has no A2DP sink with real codecs.
 | adb, Bluetooth | The phone's adapter on and off (`svc bluetooth`, with su on API 28) | See [device_state.py](mobly_tests/lib/device_state.py). A2DP alone can't be switched from adb: `cmd bluetooth_manager` on API 36 only offers the adapter and its BLE mode (D14) |
 | adb, app lifecycle | Install, update, clear data, kill the process, grant and revoke the permission, launch activities | Revoking a permission kills the process |
 | adb, companion | `cmd companiondevice associate/disassociate` (checked on 28 and 32, to check on 36) | Links a device without the system dialog (D9) |
-| Headset | Depends on the backend, see [6.3](#63-headsets). Qudelix: `bt-off` (device disappears), `no-a2dp` (A2DP down, link and BLE stay), `normal`, `cycle` | `no-a2dp` gives the state "present but A2DP not connected" that cold start tests need |
+| Headset | Depends on the backend, see [6.3](#63-headsets). Qudelix: `bt-off` (device disappears), `no-a2dp` (A2DP down, link and BLE stay), `normal`, `reboot` | `no-a2dp` gives the state "present but A2DP not connected" that cold start tests need |
 | Developer options | Change the codec like a user would | Only by UI; the snippet's direct set is the faster equivalent |
 
 ### 3.3 What to assert where
@@ -175,7 +175,7 @@ Pitfalls the harness has to handle:
   phone's Bluetooth off, and appears and disappears every 15–20 s, each time
   resolving `PROFILE_UNAVAILABLE` (C13, D20).
 - Only a full reconnect brings the codec back to the phone's own choice: the
-  headset going away (Qudelix `cycle`) or the phone's Bluetooth off and on.
+  headset going away (a Qudelix `reboot` or `cycle`) or the phone's Bluetooth off and on.
   After an A2DP-only reconnect (`no-a2dp`, `normal`) the stack keeps the codec
   that was set before.
 - Opening the main screen logs the current codec as
@@ -454,7 +454,7 @@ to diagnose a problem with that headset, so the harness abstracts it.
 
 | Operation | For the app | Qudelix backend | Phone backend (any headset) |
 | --- | --- | --- | --- |
-| `reconnect()` | The device goes away and comes back, like switching it off and on | `cycle` | The phone's Bluetooth off and on |
+| `reconnect()` | The device goes away and comes back, like switching it off and on | `normal`, then `reboot` (D21) | The phone's Bluetooth off and on |
 | `disconnect_a2dp()`, `connect_a2dp()` | A2DP goes down and up, the device stays present; the codec stays as it was | `no-a2dp`, `normal` | – |
 | `power_off()`, `power_on()` | The device disappears and appears, the phone's Bluetooth stays on | `bt-off`, reset to `normal` | – |
 | `ensure_connected()` | The connect fixture, 6.6 | | |
@@ -504,9 +504,9 @@ constants: a request verifies or gives up within about 3 s once the profile
 proxy is connected (5 attempts, 500 ms apart; a codec counts as applied after
 two matching reads, so at least 1 s), the receiver gives up after
 15 s, the main screen reads the codec every second. On API 32 a device
-disappears 7–8 s after its BLE advertisements stop. A Qudelix `cycle` takes
-5 s off plus its reboot. A timeout fails the test with the log tail and the
-current `dumpsys` state.
+disappears 7–8 s after its BLE advertisements stop. A Qudelix reconnect is a
+reboot; it answers on USB again after about 4 s. A timeout fails the test with
+the log tail and the current `dumpsys` state.
 
 ### 6.5 Log assertions
 
@@ -545,16 +545,16 @@ The sanity checks (6.9) make sure step 2 works for a phone before its tests
 start.
 
 When Bluetooth turns on, a Pixel only connects on its own to its most recently
-active A2DP device, and after a `cycle` the Qudelix only reconnects to the
+active A2DP device, and after a reconnect the Qudelix only reconnects to the
 phone it served last. After one connect from its Bluetooth settings, turning a
 Pixel's Bluetooth on connects within 6–8 s, whichever phone the Qudelix served
 before.
 
 The S24 never connects on its own when its Bluetooth is turned on over adb. A
-`cycle` reconnects it, but only if it was the last phone the Qudelix served.
-So after a Pixel's run, step 3 connects it from its settings. After a cycle
-the Qudelix pages its last phone for up to a minute and refuses others, so
-the taps go on for 90 s. The fixture waits 15 s after Bluetooth turns on,
+reconnect of the headset does, but only if it was the last phone the Qudelix
+served. So after a Pixel's run, step 3 connects it from its settings. After a
+reconnect the Qudelix pages its last phone for up to a minute and refuses
+others, so the taps go on for 90 s. The fixture waits 15 s after Bluetooth turns on,
 then reconnects the headset once, then taps; the sanity check uses the same
 fixture. On the S24 after a Pixel's run it took 99 s.
 
@@ -956,6 +956,14 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   counts a device as gone 7–8 s after its BLE advertisements stop. C5, which
   without the permission depends on the device appearing again, switches the
   headset off for 15 s instead, like C1.
+- A plain reboot of the Qudelix compared with a `cycle`, on all three phones:
+  A2DP is down within 1.3 s either way and dumpsys shows it disconnected by
+  the time the reboot returns; the codec comes back as the phone's own choice
+  every time; A2DP is back 1–3.5 s sooner (7–8 s on the Pixels, 11–12 s on
+  the S24). With the app's process alive, neither makes the app log
+  `DEVICE_APPEARED` on API 32 or 36. After C2 restarts the process, the S24
+  logs one appearance per reconnect with either, from the source `Bluetooth`
+  or `BLE`.
 - The Qudelix once didn't answer its mode query for about 3 minutes. The
   backend retries it for 20 s; beyond that the class is aborted, like any
   baseline that can't be checked, instead of every test failing on it.
@@ -1023,3 +1031,7 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   whether the system keeps reporting the headset present made it about 410 s
   of a 30 minute run on the API 32 Pixel. What it recorded on API 32 and 36
   stays in section 12.
+- **D21** The Qudelix backend's `reconnect()` is a reboot of the 5K instead
+  of `bt-off`, 5 s and `normal`. It's a full reconnect on every phone and
+  saves about 3 s each time, some 30 times a run (section 12). A reboot keeps
+  the mode, so the headset is set to `normal` first.
