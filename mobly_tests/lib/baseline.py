@@ -28,6 +28,8 @@ USER_FLAGS = {"USER_SET", "USER_FIXED"}
 CONNECT_TIMEOUT = 40.0
 # After a reconnect the Qudelix pages the phone it served last for up to a minute, refusing others
 SETTINGS_TIMEOUT = 90.0
+# pm clear removes the link on API 36 within about 0.1 s, measured on the S24
+UNLINK_TIMEOUT = 5.0
 
 
 def foreground_activity(adb):
@@ -171,7 +173,10 @@ class Baseline:
             companion.link(adb, app.PACKAGE, self.headset.address)
         # Always, so nothing survives in the process's memory either
         app.clear_data(adb)
-        # On API 36 clearing the data also removes the link
+        # On API 36 clearing the data also removes the link, about 0.1 s after pm clear returns.
+        # Checking right away can still see it, and then the link is missing for the test.
+        if self.sdk >= 36:
+            companion.wait_unlinked(adb, app.PACKAGE, self.headset.address, timeout=UNLINK_TIMEOUT)
         if not companion.is_linked(adb, app.PACKAGE, self.headset.address):
             companion.link(adb, app.PACKAGE, self.headset.address)
         app.grant_permission(adb)

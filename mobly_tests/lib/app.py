@@ -101,7 +101,7 @@ def clear_data(adb):
 
     It also revokes the permission and clears its flags, and doesn't stop the
     package. On API 28 and 32 it keeps the link and observing, on API 36 it
-    removes the link.
+    removes the link, shortly after pm clear returns.
     """
     out = device_state.shell(adb, f"pm clear {PACKAGE}")
     if "Success" not in out:

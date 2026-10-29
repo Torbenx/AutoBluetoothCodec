@@ -8,6 +8,7 @@ and 32 show it nowhere, not even in the system's associations file.
 
 import dataclasses
 import re
+import time
 
 from lib import device_state
 
@@ -73,6 +74,16 @@ def link(adb, package, address):
     device_state.shell(adb, f"cmd companiondevice associate {USER} {package} {address.upper()}")
     if not is_linked(adb, package, address):
         raise RuntimeError(f"couldn't link {address} to {package}")
+
+
+def wait_unlinked(adb, package, address, timeout):
+    """Waits until the device isn't linked to the package, returns whether it is still."""
+    end = time.time() + timeout
+    while is_linked(adb, package, address):
+        if time.time() >= end:
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def unlink(adb, package, address):

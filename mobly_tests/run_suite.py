@@ -18,10 +18,13 @@ Usage, from this folder:
   .venv/Scripts/python run_suite.py --suite ui --phone <serial>
 Before a phone's tests, sanity checks make sure it's plugged in, awake,
 unlocked, alone with Bluetooth on, and that the headset connects when
-Bluetooth turns on; a phone that fails them is skipped. `--suite smoke`
+Bluetooth turns on; a phone that fails them isn't tested. `--suite smoke`
 checks that the baseline is stable.
 
 Results go to results/<time>/, one Mobly log directory per phone and suite.
+A suite passes when no test failed or was aborted; tests that don't apply to
+the phone or headset (require()) are listed with their reasons. Mobly's own
+files call both kinds SKIP.
 """
 
 import argparse
@@ -44,7 +47,7 @@ from lib import app
 from lib import device_state
 from lib import headset as headset_controller
 from lib import sanity
-from lib.device_test import DeviceTest
+from lib.device_test import DeviceTest, is_not_applicable
 
 HERE = pathlib.Path(__file__).resolve().parent
 SUITES = ["ui", "journeys", "bt_logic", "cold_start"]
@@ -106,10 +109,37 @@ def test_classes(suite):
             and any(name.startswith("test_") for name in dir(cls))]
 
 
+class HideMoblySkips(logging.Filter):
+    """Hides Mobly's console lines that call a test that didn't run SKIP or Skipped.
+
+    Mobly uses them both for tests that don't apply and for aborted ones;
+    DeviceTest.on_skip() and run_mobly() tell them apart instead.
+    """
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not (message.startswith(("Summary for test class", "Summary for test run", "Reason to skip:"))
+                    or message.startswith("[Test] ") and message.endswith(" SKIP"))
+
+
+def print_not_run(kind, records):
+    """Prints the tests that didn't run, one line per reason."""
+    reasons = {}
+    for record in records:
+        reasons.setdefault(record.details, []).append(record.test_name)
+    for reason, names in reasons.items():
+        print(f"    {kind}: {', '.join(names) if len(names) <= 3 else f'{len(names)} tests'}: {reason}")
+
+
 def run_mobly(config_path, suite, tests=None):
+    """Runs a suite, returns whether it passed: no test failed or was aborted, D22."""
     config = config_parser.load_test_config_file(str(config_path))[0]
     runner = test_runner.TestRunner(log_dir=config.log_path, testbed_name=config.testbed_name)
     with runner.mobly_logger():
+        for handler in logging.getLogger().handlers:
+            # Only the console, test_log.INFO keeps every line; a FileHandler is a StreamHandler too
+            if type(handler) is logging.StreamHandler:
+                handler.addFilter(HideMoblySkips())
         for cls in test_classes(suite):
             # --test may name tests of several suites
             own = [test for test in tests if hasattr(cls, test)] if tests else None
@@ -119,7 +149,14 @@ def run_mobly(config_path, suite, tests=None):
         runner.run()
     # Mobly leaves the root logger at DEBUG, which would print every adb command from here on
     logging.getLogger().setLevel(logging.WARNING)
-    return runner.results.is_all_pass
+    results = runner.results
+    not_applicable = [r for r in results.skipped if is_not_applicable(r)]
+    aborted = [r for r in results.skipped if not is_not_applicable(r)]
+    print(f"  {suite}: {len(results.passed)} passed, {len(results.failed) + len(results.error)} failed, "
+          f"{len(not_applicable)} not applicable, {len(aborted)} aborted")
+    print_not_run("not applicable", not_applicable)
+    print_not_run("aborted", aborted)
+    return results.is_all_pass and not aborted
 
 
 def run_ui(adb, directory):

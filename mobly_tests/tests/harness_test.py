@@ -4,10 +4,15 @@
   python -m unittest tests.harness_test
 """
 
+import logging
 import pathlib
 import unittest
 
-from lib import app, app_log, baseline, bt_oracle, companion
+from mobly import records
+from mobly import signals
+
+import run_suite
+from lib import app, app_log, baseline, bt_oracle, companion, device_test
 
 TESTDATA = pathlib.Path(__file__).resolve().parents[1] / "testdata"
 SAMPLE_LOG = pathlib.Path(__file__).resolve().parents[2] / "app/src/sharedTest/resources/sample_event_log.jsonl"
@@ -143,6 +148,31 @@ class InstrumentationTest(unittest.TestCase):
                   "Tests run: 38,  Failures: 1\n")
         self.assertEqual((38, 1, ["com.tt.autobluetoothcodec.MainScreenTest#noCodecInformation"]),
                          app.parse_instrumentation(output))
+
+
+class NotRunTest(unittest.TestCase):
+    def record(self, signal):
+        record = records.TestResultRecord("test_x", "ColdStartTest")
+        record.test_skip(signal)
+        return record
+
+    def test_onlyRequireIsNotApplicable(self):
+        self.assertTrue(device_test.is_not_applicable(self.record(device_test.NotApplicable("API 31+"))))
+        for signal in (signals.TestAbortClass("the baseline can't be established"),
+                       signals.TestSkip("asserts.skip()"), RuntimeError("setup_class failed")):
+            self.assertFalse(device_test.is_not_applicable(self.record(signal)))
+
+    def test_moblySkipLinesHidden(self):
+        hide = run_suite.HideMoblySkips()
+
+        def shown(message, *args):
+            return hide.filter(logging.LogRecord("", logging.INFO, "", 0, message, args, None))
+        self.assertFalse(shown("Summary for test class %s: %s", "ColdStartTest", "Skipped 11"))
+        self.assertFalse(shown("Summary for test run x:\nTest results: Skipped 11"))
+        self.assertFalse(shown("Reason to skip: %s", "API 31+"))
+        self.assertFalse(shown("[Test] %s %s", "test_x", "SKIP"))
+        self.assertTrue(shown("[Test] %s %s", "test_x", "PASS"))
+        self.assertTrue(shown("test_x is not applicable: API 31+"))
 
 
 if __name__ == "__main__":

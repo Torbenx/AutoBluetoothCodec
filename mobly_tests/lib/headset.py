@@ -2,7 +2,7 @@
 
 The headset is part of the testbed: testbed.yaml names it and its backend,
 and the same tests run with each. A backend offers what it can, tests that
-need more check `capabilities` and skip:
+need more check `capabilities` and are not applicable without them:
 
   * qudelix: the Qudelix-5K over USB. It can switch A2DP alone (no-a2dp)
     and its Bluetooth (bt-off), so it has both capabilities.
@@ -20,6 +20,7 @@ import pathlib
 import sys
 import time
 
+from lib import bt_oracle
 from lib import device_state
 from lib import qudelix5k
 
@@ -110,12 +111,18 @@ class QudelixHeadset(Headset):
                 device.close()
             time.sleep(1)
 
+    # Usually the phone shows A2DP down by the time the 5K answers on USB again; the S24 once took 6 s
+    DISCONNECT_TIMEOUT = 15.0
+
     def reconnect(self, adb):
         # A reboot is a full reconnect on every phone, about 3 s sooner than bt-off, 5 s and
         # normal (D21). It keeps the mode, so a headset left in another one, by an aborted run
         # for example, is set to normal first.
         self._set("normal")
         self._reboot()
+        # Until the phone notices, it still reports the old connection, and a wait for A2DP
+        # connected would return at once
+        bt_oracle.wait_connected(adb, self.address, timeout=self.DISCONNECT_TIMEOUT, connected=False)
 
     def disconnect_a2dp(self):
         self._set("no-a2dp")

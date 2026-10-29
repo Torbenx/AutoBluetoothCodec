@@ -57,8 +57,8 @@ Assumptions:
 ### Phone capabilities
 
 Tests don't name phones (D7). They name the API levels they apply to and the
-capabilities they need. A phone without one skips the test, with the reason
-in the report. Only what genuinely can't work without root or with a secure
+capabilities they need. On a phone without one the test is not applicable,
+with the reason in the report. Only what genuinely can't work without root or with a secure
 lock screen is a capability:
 
 | Capability | Known from | Needed by | Testbed |
@@ -205,7 +205,7 @@ baseline ([6.2](#62-baseline-state)).
 In the device catalogs, "Runs on" gives API levels, not phones. A test runs on
 every phone that matches and asserts the behaviour of that phone's API level.
 "Needs" lists phone capabilities ([section 2](#phone-capabilities)) and headset
-capabilities ([6.3](#63-headsets)); without them the test is skipped.
+capabilities ([6.3](#63-headsets)); without them the test is not applicable.
 
 Priorities: **P1** first, they cover the core promise and the bugs already
 found; **P2** next; **P3** when there's time.
@@ -462,7 +462,7 @@ to diagnose a problem with that headset, so the harness abstracts it.
 | `address`, `name` | | From `testbed.yaml` | From `testbed.yaml` |
 
 The rows with a dash are the headset capabilities **A2DP switch** and **power
-switch**. A test that needs one is skipped with a headset that lacks it. With
+switch**. A test that needs one is not applicable with a headset that lacks it. With
 the phone backend, `reconnect()` also turns the app's profile proxy off and on;
 tests whose subject is the phone's adapter (B7, C10) call `device_state`
 directly and run with every headset.
@@ -476,8 +476,8 @@ configuration, and the same tests run with each:
   would need both kinds of hardware.
 - A new headset is a new entry in `testbed.yaml`, no code. Its results are
   reported under its own testbed name, which is what diagnosing it needs.
-- What only one backend can do is either a capability (the test is skipped
-  elsewhere) or a test of its own (the phone's adapter: B7, C10).
+- What only one backend can do is either a capability (the test is not
+  applicable elsewhere) or a test of its own (the phone's adapter: B7, C10).
 
 ```yaml
 phones:
@@ -596,7 +596,9 @@ like the S24's, is outside the suite too (D7).
    other: the sanity checks, Bluetooth on, the L2 tests (section 7), the
    journeys, then L3 and L4, Bluetooth off. The journeys need the screen on,
    so they run before the tests that turn it off or reboot.
-3. Every phone runs every test its API level and capabilities allow.
+3. Every phone runs every test its API level and capabilities allow. A suite
+   passes when no test failed or was aborted; the tests that are not
+   applicable are listed with their reasons (D22).
 
 The suite doesn't change the settings `testbed_session.py` takes care of
 (D15). It checks them, and a phone that fails a sanity check fails right away
@@ -798,7 +800,7 @@ needs the ones before it unless it says otherwise.
     to end on every phone.
 12. **P2 of all levels** (done), including C9, C13 (since removed, D20) and
     the phone backend of the `Headset` controller, checked with the Qudelix as
-    `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is skipped for its API level or
+    `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is not applicable for its API level or
     headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
 13. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
@@ -958,7 +960,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   headset off for 15 s instead, like C1.
 - A plain reboot of the Qudelix compared with a `cycle`, on all three phones:
   A2DP is down within 1.3 s either way and dumpsys shows it disconnected by
-  the time the reboot returns; the codec comes back as the phone's own choice
+  the time the reboot returns. Once the S24 still showed the old connection
+  about 6 s after the reboot started, 1–2 s after the 5K answered on USB
+  again, so `reconnect()` waits for dumpsys to show A2DP down. The codec comes back as the phone's own choice
   every time; A2DP is back 1–3.5 s sooner (7–8 s on the Pixels, 11–12 s on
   the S24). With the app's process alive, neither makes the app log
   `DEVICE_APPEARED` on API 32 or 36. After C2 restarts the process, the S24
@@ -983,8 +987,8 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - **D5** Screenshot tests after the UI polish; noted in the
   [development plan](DevelopmentPlan.md).
 - **D6** A headset can only connect to the phones on adb.
-- **D7** No special cases per phone. Tests are skipped only for what can't
-  work without root or with a secure lock screen. Saving and restoring a
+- **D7** No special cases per phone. Tests are not applicable only for what
+  can't work without root or with a secure lock screen. Saving and restoring a
   phone's own data is outside the suite.
 - **D8** Everything that was in question gets tested: C3 and C9 assert
   today's behaviour as the baseline for later changes (6.7).
@@ -1035,3 +1039,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   of `bt-off`, 5 s and `normal`. It's a full reconnect on every phone and
   saves about 3 s each time, some 30 times a run (section 12). A reboot keeps
   the mode, so the headset is set to `normal` first.
+- **D22** Mobly records every test that didn't run as SKIP, which hid a class
+  abort behind a passing suite. The suite tells them apart: a test is **not
+  applicable** when `require()` ends it (`NotApplicable`), for its API level,
+  a capability or a secure lock screen, and **aborted** otherwise, like after
+  a class abort (D12). An aborted test fails the suite; `run_suite.py` lists
+  both with their reasons and hides Mobly's console lines that say SKIP.

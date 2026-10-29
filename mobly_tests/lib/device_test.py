@@ -21,15 +21,33 @@ from lib import device_state
 from lib import headset as headset_controller
 
 
+class NotApplicable(signals.TestSkip):
+    """Raised by require(): the phone or headset can't do what the test needs.
+
+    Mobly records it as a SKIP like any test it didn't run. The suite calls a
+    test not applicable only for this signal, and any other test that didn't
+    run aborted, see is_not_applicable().
+    """
+
+
+def is_not_applicable(record):
+    """Whether a record Mobly counts as SKIP is a test that doesn't apply, not an aborted one.
+
+    Aborts end up there too: Mobly records the tests after a class abort, or
+    after an error in setup_class, with the abort's signal.
+    """
+    return record.termination_signal_type == NotApplicable.__name__
+
+
 def is_failing():
     """Whether the test is failing, asked from teardown_test.
 
     Mobly calls the teardown in a finally block, so the exception the setup or
-    the test raised is still the one being handled. Passes and skips are
-    exceptions too.
+    the test raised is still the one being handled. Passes and not applicable
+    tests are exceptions too.
     """
     error = sys.exc_info()[1]
-    return error is not None and not isinstance(error, (signals.TestPass, signals.TestSkip))
+    return error is not None and not isinstance(error, (signals.TestPass, NotApplicable))
 
 
 class DeviceTest(base_test.BaseTestClass):
@@ -51,9 +69,9 @@ class DeviceTest(base_test.BaseTestClass):
         self.allowed_interrupted = 0
 
     def require(self, condition, reason):
-        """Skips the test unless the phone or headset can do what it needs."""
+        """Ends the test as not applicable unless the phone or headset can do what it needs."""
         if not condition:
-            raise signals.TestSkip(reason)
+            raise NotApplicable(reason)
 
     def require_capability(self, capability):
         self.require(capability in self.headset.capabilities,
@@ -62,6 +80,13 @@ class DeviceTest(base_test.BaseTestClass):
     def on_fail(self, record):
         if getattr(self, "_artifacts", None) is None:
             self.collect_artifacts()
+
+    def on_skip(self, record):
+        # Mobly's own lines for it say SKIP, run_suite.py hides them on the console
+        if is_not_applicable(record):
+            self.ad.log.info("%s is not applicable: %s", record.test_name, record.details)
+        else:
+            self.ad.log.warning("%s was aborted: %s", record.test_name, record.details)
 
     def check_invariants(self, settle=10.0):
         """The log's problems at the end of a test, 6.5: its structure, open and interrupted
