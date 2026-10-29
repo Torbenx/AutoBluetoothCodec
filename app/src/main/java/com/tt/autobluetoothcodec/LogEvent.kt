@@ -11,8 +11,6 @@ import kotlinx.serialization.Serializable
 enum class OperationFlow { TRIGGER, ELEMENT, RESOLUTION, STANDALONE }
 
 enum class EventType(val flow: OperationFlow) {
-    // A device appeared to CodecCompanionService, its preferred codec is applied
-    DEVICE_APPEARED(OperationFlow.TRIGGER),
     // A2DP connected to a device with a preferred codec, it's applied
     A2DP_CONNECTED(OperationFlow.TRIGGER),
     // The user chose a codec in the UI
@@ -52,6 +50,7 @@ enum class EventType(val flow: OperationFlow) {
     // but why isn't known: it may have crashed, been force-stopped or been killed by the system
     OPERATION_INTERRUPTED(OperationFlow.RESOLUTION),
 
+    DEVICE_APPEARED(OperationFlow.STANDALONE),
     DEVICE_DISAPPEARED(OperationFlow.STANDALONE),
     // MainActivity read a codec that differs from the last one known for the device, while the app
     // wasn't changing it. When the codec changed isn't known, only that it changed since the last

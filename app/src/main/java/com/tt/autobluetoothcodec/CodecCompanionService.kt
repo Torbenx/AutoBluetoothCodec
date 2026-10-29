@@ -101,24 +101,16 @@ class CodecCompanionService : CompanionDeviceService() {
     /** Since API 36 [source] is the one the device appeared on first. */
     private fun deviceAppeared(address: String, source: String?) {
         val device = getDevice(address)
-        val operation = EventLog.get(this).begin(EventType.DEVICE_APPEARED,
+        EventLog.get(this).log(EventType.DEVICE_APPEARED,
             device?.let { LogDevice.of(it) } ?: LogDevice(address.uppercase()), message = source)
-        if (device == null) {
-            operation.resolve(EventType.ERROR, message = "no Bluetooth adapter")
+        if (device == null || PreferredCodecStore.get(this, device) == null)
             return
-        }
-        if (PreferredCodecStore.get(this, device) == null) {
-            operation.resolve(EventType.NO_PREFERRED_CODEC)
-            return
-        }
         presentDevices.add(device.address)
         if (!receiverRegistered) {
             ContextCompat.registerReceiver(this, a2dpReceiver,
                 IntentFilter(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED), ContextCompat.RECEIVER_EXPORTED)
             receiverRegistered = true
         }
-        // Applies right away if A2DP is connected already, otherwise the receiver picks it up
-        applyCodec(device, operation)
     }
 
     /** Since API 36 [source] is the last one the device was seen on. */
