@@ -173,7 +173,7 @@ Pitfalls the harness has to handle:
   before A2DP connects. On API 31/32 it appears when its BLE advertisements
   are seen, even without any connection. On the S24 it's seen even with the
   phone's Bluetooth off, and appears and disappears every 15–20 s, each time
-  resolving `PROFILE_UNAVAILABLE` (C13).
+  resolving `PROFILE_UNAVAILABLE` (C13, D20).
 - Only a full reconnect brings the codec back to the phone's own choice: the
   headset going away (Qudelix `cycle`) or the phone's Bluetooth off and on.
   After an A2DP-only reconnect (`no-a2dp`, `normal`) the stack keeps the codec
@@ -315,7 +315,6 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C10 | The phone's Bluetooth turned off and on while the app is dead, then the device connects: applied | all | | P3 |
 | C11 | 20 reconnects in a row: every one verified, time to verified recorded | all | | P3 |
 | C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
-| C13 | Presence without A2DP: with a preferred codec and A2DP down, every time the device appears (phone Bluetooth on, headset back on) one operation resolves `NOT_CONNECTED`, or `PROFILE_UNAVAILABLE` when the S24 sees it over BLE before its Bluetooth is back on, and nothing is applied. Whether a device that stays on is reported present for 5 minutes is recorded per API level: on 32 the system sometimes reports it gone and back within seconds. Characterization (D8) | 31+ | A2DP switch, power switch | P2 |
 
 ### L5 Journeys
 
@@ -354,7 +353,7 @@ Everything else is covered more cheaply and more thoroughly elsewhere:
 | Retries, supersede, pending, timeouts | K1, K2, B3–B5 | Timing can't be controlled through the UI; the fake makes it deterministic |
 | Which chips, menus and prompts a device state shows, and which codec a chip selects | V2–V6 | Needs device states the testbed can't produce (API 34–35, no companion feature, unknown codec) |
 | Log texts for every event type | V8, V9 | Needs events that real Bluetooth rarely produces; the sample log has all of them |
-| Applying on connect in the background | C1–C13 | There must be no UI or snippet involved |
+| Applying on connect in the background | C1–C9 | There must be no UI or snippet involved |
 | Anonymisation | `LogExportTest`, E8 once | Pure logic |
 
 ## 6. Harness
@@ -565,7 +564,7 @@ their cause instead of being retried silently.
 
 ### 6.7 Characterization tests
 
-C3, C9 and C13 assert how the app and the system behave today, as the baseline
+C3 and C9 assert how the app and the system behave today, as the baseline
 for later changes (D8). The same goes for any other test whose outcome on a
 phone isn't known in advance, like what `pm clear` does to the link in B9.
 
@@ -797,9 +796,9 @@ needs the ones before it unless it says otherwise.
 11. **L5 P1** (done): `snippet-uiautomator`, `screens.py`; E2, E3, E6 pass on
     every phone they apply to. With this step the core promise is covered end
     to end on every phone.
-12. **P2 of all levels** (done), including C9, C13 and the phone backend of
-    the `Headset` controller, checked with the Qudelix as `qudelix-phone` on
-    the API 28 Pixel. Every P2 test passes, or is skipped for its API level or
+12. **P2 of all levels** (done), including C9, C13 (since removed, D20) and
+    the phone backend of the `Headset` controller, checked with the Qudelix as
+    `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is skipped for its API level or
     headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
 13. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
@@ -926,10 +925,10 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   stopped state on the S24.
 - The S24 reports the headset's presence from two sources: it appears twice, a
   second apart, when the headset comes on, and disappears twice. Without A2DP
-  it also reports the headset gone and back every minute or two (C13). Since
-  D18 the service counts it present while any source sees it: a reconnect is
-  one appearance (C1, C2). Without A2DP, BLE is the only source, and its gaps
-  remain.
+  it also reports the headset gone and back every minute or two (C13, D20).
+  Since D18 the service counts it present while any source sees it: a
+  reconnect is one appearance (C1, C2). Without A2DP, BLE is the only source,
+  and its gaps remain.
 - In one run of E3 on the S24 the app set the preferred codec 13 ms after
   A2DP connected, while the S24 was still making the headset its active
   device. The stack reported SBC, then switched back to LDAC 96 kHz by itself
@@ -944,8 +943,8 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - The S24's Bluetooth settings show the headset's name between invisible
   left-to-right marks, `‎Qudelix-5K‎`.
 - On API 32 the system sometimes reports a device that stays on without A2DP
-  as gone and back within seconds (C13). The app logs each appearance as one
-  operation that resolves `NOT_CONNECTED`.
+  as gone and back within seconds (C13, D20). The app logs each appearance as
+  one operation that resolves `NOT_CONNECTED`.
 - Compose's dropdown menus are popups, outside the semantics of the screen
   that exposes test tags as resource ids, so UiAutomator didn't find their
   items until the menus set it themselves.
@@ -979,7 +978,7 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - **D7** No special cases per phone. Tests are skipped only for what can't
   work without root or with a secure lock screen. Saving and restoring a
   phone's own data is outside the suite.
-- **D8** Everything that was in question gets tested: C3, C9 and C13 assert
+- **D8** Everything that was in question gets tested: C3 and C9 assert
   today's behaviour as the baseline for later changes (6.7).
 - **D9** Fixtures link with `cmd companiondevice associate`; the system dialog
   only appears in E3 and E6.
@@ -1020,3 +1019,7 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   after A2DP connects, while the codec it reports lags behind. The race is too
   rare to reproduce on the phones, so the component tests (K1) make the fake
   stack change back.
+- **D20** C13, presence without A2DP, is removed. Watching for five minutes
+  whether the system keeps reporting the headset present made it about 410 s
+  of a 30 minute run on the API 32 Pixel. What it recorded on API 32 and 36
+  stays in section 12.

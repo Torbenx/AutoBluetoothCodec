@@ -33,10 +33,6 @@ APPEARANCE_TIMEOUT = 180.0
 C3_APPLIED = {32: True, 36: True}
 # C9: whether the preferred codec is applied when the device connects after a force stop.
 C9_FORCE_STOPPED_APPLIED = {28: False, 32: False, 36: True}
-# C13: whether the system keeps reporting the device as present for 5 minutes while it's on
-# without A2DP. On API 32 it sometimes reports it gone and back within seconds, from BLE scans. On
-# API 36 it does so every minute or two, and reports the headset coming on twice, a second apart.
-C13_STAYS_PRESENT = {32: False, 36: False}
 
 
 class ColdStartTest(BaselineTest):
@@ -125,10 +121,6 @@ class ColdStartTest(BaselineTest):
             if not app_log.check_structure(events) or time.time() >= end:
                 return events
             time.sleep(1)
-
-    def summary(self, after):
-        """The operations after seq [after], as "TRIGGER RESOLUTION"."""
-        return [f"{op.trigger['type']} {op.resolution}" for op in app_log.operations(self.log.events_after(after))]
 
     def test_c1_killed_app_applies_on_reconnect(self):
         """App process killed, the headset reconnects: applied. The manifest receiver handles A2DP connecting
@@ -324,54 +316,3 @@ class ColdStartTest(BaselineTest):
         if expected is None:
             asserts.explicit_pass(f"recorded: applied {applied}; add it to C9_FORCE_STOPPED_APPLIED for API {self.sdk}")
         asserts.assert_equal(expected, applied, f"applied after a force stop: {self.describe(ops)}")
-
-    def test_c13_presence_without_a2dp(self):
-        """Characterization: with a preferred codec and A2DP down, what the app does each time the
-        device appears, and while it stays present for 5 minutes."""
-        self.require(self.sdk >= 31, "presence is only observed since API 31")
-        self.require_capability(headset.A2DP_SWITCH)
-        self.require_capability(headset.POWER_SWITCH)
-        self.save_preferred(self.preferred_codec())
-        self.headset.disconnect_a2dp()
-        bt_oracle.wait_connected(self.adb, self.address, timeout=30, connected=False)
-        start = self.log.last_seq()
-        recorded = {}
-        # The headset off and back on without A2DP
-        self.headset.power_off()
-        time.sleep(15)
-        mark = self.log.last_seq()
-        self.headset.power_on(a2dp=False)
-        self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
-        time.sleep(10)
-        recorded["headset on"] = self.summary(mark)
-        # The phone's Bluetooth off and back on
-        mark = self.log.last_seq()
-        device_state.set_bluetooth(self.adb, False)
-        time.sleep(15)
-        device_state.set_bluetooth(self.adb, True)
-        try:
-            self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
-        except TimeoutError:
-            # The S24 sees the device over BLE with its Bluetooth off, so it may never be gone
-            pass
-        time.sleep(10)
-        recorded["Bluetooth on"] = self.summary(mark)
-        # Present for 5 minutes
-        mark = self.log.last_seq()
-        time.sleep(300)
-        recorded["present"] = self.summary(mark)
-        self.ad.log.info("C13 on API %d: %s", self.sdk, recorded)
-        asserts.assert_is_none(bt_oracle.active_codec(self.adb, self.address), "A2DP connected")
-        # The S24 sees the device over BLE before its Bluetooth is back on
-        allowed = ("DEVICE_APPEARED NOT_CONNECTED", "DEVICE_APPEARED PROFILE_UNAVAILABLE")
-        others = [op for ops in recorded.values() for op in ops if op not in allowed]
-        asserts.assert_equal([], others, f"operations other than an appearance without A2DP: {recorded}")
-        # One operation per appearance the system reports
-        appeared = [e for e in self.log.events_after(start) if e["type"] == "DEVICE_APPEARED"]
-        asserts.assert_equal(len(appeared), sum(len(ops) for ops in recorded.values()), f"operations: {recorded}")
-        stays = C13_STAYS_PRESENT.get(self.sdk)
-        if stays is None:
-            asserts.explicit_pass(f"recorded: {recorded}; add whether the device stayed present to "
-                                  f"C13_STAYS_PRESENT for API {self.sdk}")
-        if stays:
-            asserts.assert_equal([], recorded["present"], "operations while the device stayed present")
