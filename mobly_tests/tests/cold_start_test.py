@@ -50,9 +50,8 @@ class ColdStartTest(BaselineTest):
         self.ad.load_snippet(SNIPPET, app.SNIPPET_PACKAGE)
         try:
             getattr(self.ad, SNIPPET).setPreferredCodec(self.address, codec.to_app())
-            # On API 32 the device appears right after observing starts, and the service applies the
-            # codec; unloading the snippet ends the process, which mustn't interrupt that
-            time.sleep(2)
+            # On API 32 the device appears right after observing starts. The service only logs that,
+            # it applies the codec when A2DP connects, so unloading the snippet interrupts nothing
             self.wait_until_resolved(timeout=15)
         finally:
             self.ad.unload_snippet(SNIPPET)
@@ -74,12 +73,12 @@ class ColdStartTest(BaselineTest):
                 asserts.fail(f"{codec} wasn't applied within {timeout:.0f} s, dumpsys shows {dumped}: {self.describe(ops)}")
             time.sleep(1)
 
-    def check_one_appearance(self, ops):
+    def check_one_appearance(self, after):
         """Since API 36 the service counts a device present while any source sees it (D18), so a
-        reconnect is one appearance, not one per source."""
+        reconnect after seq [after] is one appearance, not one per source."""
         if self.sdk >= 36:
-            appeared = [op for op in ops if op.trigger["type"] == "DEVICE_APPEARED"]
-            asserts.assert_equal(1, len(appeared), f"appearances: {self.describe(ops)}")
+            appeared = [e for e in self.log.events_after(after) if e["type"] == "DEVICE_APPEARED"]
+            asserts.assert_equal(1, len(appeared), f"appearances from the sources {[e.get('message') for e in appeared]}")
 
     def resolved_after(self, seq):
         return [op for op in app_log.operations(self.log.events_after(seq)) if op.resolution]
@@ -145,7 +144,7 @@ class ColdStartTest(BaselineTest):
                 asserts.fail(f"the manifest receiver didn't handle A2DP connecting: {self.describe(ops)}")
             time.sleep(1)
         self.ad.log.info("C1: %s", self.describe(ops))
-        self.check_one_appearance(ops)
+        self.check_one_appearance(mark)
 
     def test_c2_app_in_front_applies_on_reconnect(self):
         """The same with the main screen open (manual 2.1)."""
@@ -156,7 +155,7 @@ class ColdStartTest(BaselineTest):
         self.headset.reconnect(self.adb)
         ops = self.wait_for_applied(mark, codec)
         self.ad.log.info("C2 in front: %s", self.describe(ops))
-        self.check_one_appearance(ops)
+        self.check_one_appearance(mark)
 
     def test_c2_app_in_background_applies_on_reconnect(self):
         """The same with the process alive in the background."""
@@ -169,7 +168,7 @@ class ColdStartTest(BaselineTest):
         self.headset.reconnect(self.adb)
         ops = self.wait_for_applied(mark, codec)
         self.ad.log.info("C2 in background: %s", self.describe(ops))
-        self.check_one_appearance(ops)
+        self.check_one_appearance(mark)
 
     def test_c3_killed_while_present_then_a2dp_connects(self):
         """Characterization: the process is killed while the device is present with A2DP down, then A2DP connects."""
@@ -184,7 +183,7 @@ class ColdStartTest(BaselineTest):
         mark = self.log.last_seq()
         self.headset.power_on(a2dp=False)
         # Seen through BLE scans or the link
-        appeared = self.log.wait_for_operation(after=mark, trigger="DEVICE_APPEARED", device=self.address, timeout=APPEARANCE_TIMEOUT)
+        appeared = self.log.wait_for_event("DEVICE_APPEARED", after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
         self.ad.log.info("C3: %s", appeared)
         app.kill(self.adb)
         time.sleep(5)
@@ -223,23 +222,26 @@ class ColdStartTest(BaselineTest):
         asserts.assert_equal([], app_log.check_structure(events), "the log after the next start")
 
     def test_c5_permission_revoked(self):
-        """Without the permission, the device connects: NO_PERMISSION is logged, nothing applied, no crash."""
+        """Without the permission, the device connects: the service logs its appearance, nothing is
+        applied, no crash."""
         self.require(self.sdk >= 31, "the permission exists since API 31")
         codec = self.preferred_codec()
         self.save_preferred(codec)
         app.revoke_permission(self.adb)
-        # Without the permission the receiver gets no broadcast, only the device appearing again starts
-        # the service. On API 32 a device is gone 7 to 8 s after its BLE advertisements stop.
+        # Without the permission the receivers get no broadcast, only the device appearing again starts
+        # the service, which applies nothing until A2DP connects. On API 32 a device is gone 7 to 8 s
+        # after its BLE advertisements stop.
         self.headset_off()
         time.sleep(15)
         mark = self.log.last_seq()
         self.headset_on()
-        op = self.log.wait_for_operation(after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
+        self.log.wait_for_event("DEVICE_APPEARED", after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
+        bt_oracle.wait_connected(self.adb, self.address, timeout=baseline.CONNECT_TIMEOUT)
         time.sleep(10)
         ops = app_log.operations(self.log.events_after(mark))
         self.ad.log.info("C5: %s", self.describe(ops))
-        asserts.assert_equal("NO_PERMISSION", op.resolution, self.describe(ops))
-        asserts.assert_false(any(o.resolution == "CODEC_VERIFIED" for o in ops), self.describe(ops))
+        # Anything that tries to apply the codec without the permission resolves NO_PERMISSION
+        asserts.assert_true(all(o.resolution == "NO_PERMISSION" for o in ops), self.describe(ops))
         asserts.assert_false(same_format(codec, bt_oracle.active_codec(self.adb, self.address)), "the codec was applied")
 
     def test_c6_no_preferred_codec(self):
@@ -262,6 +264,8 @@ class ColdStartTest(BaselineTest):
         self.require(not self.secure_lock_screen, "after a reboot the app can't run until the phone is unlocked")
         codec = self.preferred_codec()
         self.save_preferred(codec)
+        # The fixture granted the permission just before, and a reboot loses it until the system writes it
+        app.wait_permission_persisted(self.adb)
         mark = self.log.last_seq()
         self.ad.reboot()
         # The phones have no secure lock screen, the keyguard only needs dismissing

@@ -134,6 +134,36 @@ def grant_permission(adb):
         device_state.shell(adb, f"pm grant {PACKAGE} {PERMISSION}")
 
 
+# The system writes runtime permissions here about 10.6 s after the last change, on API 32. A reboot
+# before that, even through the framework, loses the change.
+RUNTIME_PERMISSIONS_FILE = "/data/misc_de/0/apexdata/com.android.permission/runtime-permissions.xml"
+PERMISSION_WRITE_DELAY = 15.0
+
+
+def wait_permission_persisted(adb, timeout=30.0):
+    """Waits until the permission's current state is written, so it survives a reboot.
+
+    With root this reads the file the system writes, without it waits longer
+    than the system's write delay.
+    """
+    state = permission_state(adb)
+    if state is None:
+        return
+    if not device_state.has_su(adb):
+        time.sleep(PERMISSION_WRITE_DELAY)
+        return
+    expected = "true" if state[0] else "false"
+    end = time.time() + timeout
+    while True:
+        out = device_state.shell(adb, f"su -c \"grep -A40 'name=\\\"{PACKAGE}\\\"' {RUNTIME_PERMISSIONS_FILE}\" || true")
+        match = re.search(rf'name="{re.escape(PERMISSION)}" granted="(true|false)"', out.split("</package>")[0])
+        if match and match.group(1) == expected:
+            return
+        if time.time() >= end:
+            raise TimeoutError(f"the permission's state granted={expected} wasn't written within {timeout:.0f} s")
+        time.sleep(0.5)
+
+
 def revoke_permission(adb):
     """Revokes the permission, which kills the app's process."""
     if sdk(adb) >= 31:

@@ -47,7 +47,7 @@ class EventLogComponentTest {
 
     @Test
     fun structureViolationsThrow() {
-        assertThrows(IllegalStateException::class.java) { log.log(EventType.DEVICE_APPEARED) }
+        assertThrows(IllegalStateException::class.java) { log.log(EventType.A2DP_CONNECTED) }
         assertThrows(IllegalStateException::class.java) { log.begin(EventType.CODEC_VERIFIED, null) }
         val operation = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
         assertThrows(IllegalStateException::class.java) { operation.log(EventType.CODEC_VERIFIED) }
@@ -73,7 +73,7 @@ class EventLogComponentTest {
         writeFile(
             event(0, EventType.A2DP_CONNECTED, "done"),
             event(1, EventType.CODEC_VERIFIED, "done"),
-            event(2, EventType.DEVICE_APPEARED, "open"),
+            event(2, EventType.USER_SET_CODEC, "open"),
             event(3, EventType.SET_CODEC_CONFIG, "open"),
         )
         val last = log.events.value.last()

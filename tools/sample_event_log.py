@@ -145,7 +145,7 @@ def build(now_ms, utc_offset_minutes):
     b.event("OBSERVING_FAILED", device=DAC, delay_ms=5,
             message="android.companion.DeviceNotAssociatedException: Association for F4:4E:FD:12:34:56 doesn't exist")
     b.at(1, 8, 0)
-    b.operation("DEVICE_APPEARED", HEADPHONES, [], ("NOT_CONNECTED", 30, {"attempt": 0}))
+    b.event("DEVICE_APPEARED", device=HEADPHONES, message="Bluetooth")
     pending = b.operation("A2DP_CONNECTED", HEADPHONES, [
         (set_, 40, {"config": LDAC_96, "attempt": 1}),
         (get, 500, {"config": LDAC_96, "actual": LDAC_96, "attempt": 1}),
@@ -153,10 +153,12 @@ def build(now_ms, utc_offset_minutes):
     b.operation("A2DP_CONNECTED", HEADPHONES, [], ("ALREADY_PENDING", 1, {"message": f"pending in operation {pending}"}),
                 message="companion service")
     b.at(1, 9, 10)
-    b.operation("DEVICE_APPEARED", LC3_EARBUDS, [], ("NO_PREFERRED_CODEC", 20, {}))
-    b.operation("DEVICE_APPEARED", DAC, [], ("NO_ASSOCIATION", 20, {}))
-    b.operation("DEVICE_APPEARED", DAC, [], ("NO_PERMISSION", 20, {}))
-    b.operation("DEVICE_APPEARED", DAC, [], ("PROFILE_UNAVAILABLE", 20, {}))
+    b.event("DEVICE_APPEARED", device=DAC, message="BLE")
+    b.operation("A2DP_CONNECTED", LC3_EARBUDS, [], ("NO_PREFERRED_CODEC", 20, {}), message="manifest receiver")
+    b.operation("A2DP_CONNECTED", DAC, [], ("NOT_CONNECTED", 30, {"attempt": 0}), message="companion service")
+    b.operation("A2DP_CONNECTED", DAC, [], ("NO_ASSOCIATION", 20, {}), message="companion service")
+    b.operation("A2DP_CONNECTED", DAC, [], ("NO_PERMISSION", 20, {}), message="manifest receiver")
+    b.operation("A2DP_CONNECTED", DAC, [], ("PROFILE_UNAVAILABLE", 20, {}), message="manifest receiver")
     b.at(1, 13, 45)
     b.operation("A2DP_CONNECTED", DAC, [(set_, 40, {"config": APTX_HD, "attempt": 1})],
                 ("PROFILE_DISCONNECTED", 300, {"attempt": 1}), message="companion service")
@@ -169,7 +171,7 @@ def build(now_ms, utc_offset_minutes):
     b.operation("A2DP_CONNECTED", HEADPHONES, [(set_, 40, {"config": LDAC_96, "attempt": 1})],
                 ("CANCELLED", 200, {"attempt": 1, "message": "device disappeared"}), message="companion service")
     b.event("DEVICE_DISAPPEARED", device=HEADPHONES)
-    b.operation("DEVICE_APPEARED", NAMELESS, [], ("ERROR", 10, {"message": "no Bluetooth adapter"}))
+    b.event("DEVICE_APPEARED", device=NAMELESS)
     b.at(1, 22, 55)
     b.operation("A2DP_CONNECTED", HEADPHONES, [(set_, 40, {"config": LDAC_96, "attempt": 1})],
                 ("OPERATION_INTERRUPTED", 3_600_000, {}), message="companion service")

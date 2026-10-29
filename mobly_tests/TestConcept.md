@@ -72,7 +72,7 @@ lock screen is a capability:
 
 | Path | API 28 Pixel | API 32 Pixel | API 33 | API 34–35 | API 36 S24 | 31+ without companion feature |
 | --- | --- | --- | --- | --- | --- | --- |
-| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService` when the device appears, observed by address; `A2dpConnectReceiver` when A2DP connects later | `CodecCompanionService`, by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
+| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService` when A2DP connects while the device is present, observed by address; `A2dpConnectReceiver` too | `CodecCompanionService`, by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
 | Codec classes | reflection | reflection | public | public | public | – |
 | Runtime permission | – | yes | yes | yes | yes | yes |
 | Association needed to change the codec | no | no | no | yes | yes | – |
@@ -169,11 +169,11 @@ Pitfalls the harness has to handle:
   `A2dpStateMachine for …` block with `mConnectionState: CONNECTED` and
   `STATE_CONNECTED`. API 36 masks addresses as `XX:XX:XX:XX:4E:5F`, so there
   the device is matched by its last two bytes.
-- `DEVICE_APPEARED` resolving `NOT_CONNECTED` is normal: the device appears
-  before A2DP connects. On API 31/32 it appears when its BLE advertisements
+- The device usually appears before A2DP connects, so since D23
+  `DEVICE_APPEARED` is a standalone event and the service applies nothing
+  until A2DP connects. On API 31/32 it appears when its BLE advertisements
   are seen, even without any connection. On the S24 it's seen even with the
-  phone's Bluetooth off, and appears and disappears every 15–20 s, each time
-  resolving `PROFILE_UNAVAILABLE` (C13, D20).
+  phone's Bluetooth off, and appears and disappears every 15–20 s (C13, D20).
 - Only a full reconnect brings the codec back to the phone's own choice: the
   headset going away (a Qudelix `reboot` or `cycle`) or the phone's Bluetooth off and on.
   After an A2DP-only reconnect (`no-a2dp`, `normal`) the stack keeps the codec
@@ -242,7 +242,7 @@ levels and fakes that a phone can't provide.
 | K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request | P1 |
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
-| K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |
+| K5 | `CodecCompanionService`: no preferred codec registers no receiver; appearing registers the receiver once and applies nothing, even with A2DP connected (D23); A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |
 | K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
 | K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines; disabling deletes the log, stays disabled after a restart and keeps operations that span it out of the log | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
@@ -307,7 +307,7 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C2 | The same with the app in the foreground and in the background but alive (manual 2.1) | all | | P1 |
 | C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
 | C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
-| C5 | Permission revoked, the device connects: `NO_PERMISSION` is logged, no crash | 31+ | | P2 |
+| C5 | Permission revoked, the device connects: its appearance is logged, nothing is applied, anything that tries resolves `NO_PERMISSION`, no crash (D23) | 31+ | | P2 |
 | C6 | No preferred codec: the codec isn't touched and nothing is logged; the manifest receiver starts the process and returns | all | | P2 |
 | C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
 | C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
@@ -954,7 +954,7 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - Unloading the snippet ends the app's process. On API 32 saving a preferred
   codec makes the device appear at once and the service apply the codec, so a
   test waits for that operation before unloading, or the log check reports it
-  interrupted.
+  interrupted. Since D23 the service only logs the appearance.
 - A `cycle` doesn't always make the API 32 Pixel see the headset go: it
   counts a device as gone 7–8 s after its BLE advertisements stop. C5, which
   without the permission depends on the device appearing again, switches the
@@ -974,6 +974,13 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - The Qudelix once didn't answer its mode query for about 3 minutes. The
   backend retries it for 20 s; beyond that the class is aborted, like any
   baseline that can't be checked, instead of every test failing on it.
+- On the API 32 Pixel a permission change reaches
+  `runtime-permissions.xml` about 10.6 s after `pm grant`, and later changes
+  push it back. A reboot before that loses it, `adb reboot` and
+  `svc power reboot` alike. C7 failed once that way: the reboot came 17 s
+  after the fixture's grant, and the manifest receiver was refused A2DP
+  connecting for the missing permission. C7 now waits until the grant is
+  written, by reading the file with root, or 15 s without.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
@@ -1048,3 +1055,11 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   a capability or a secure lock screen, and **aborted** otherwise, like after
   a class abort (D12). An aborted test fails the suite; `run_suite.py` lists
   both with their reasons and hides Mobly's console lines that say SKIP.
+- **D23** The companion service no longer applies the preferred codec when a
+  device appears, only when A2DP connects while the device is present, and
+  `DEVICE_APPEARED` is a standalone event. Saving a preferred codec starts
+  observing; on API 32 the device appeared at once, and applying the preferred
+  codec then raced a codec the user chose right after. C1 and C2 count
+  appearance events, C3 and C5 wait for one instead of an operation. Without
+  the permission no receiver gets A2DP connecting, so C5 no longer sees
+  `NO_PERMISSION`, only the appearance.

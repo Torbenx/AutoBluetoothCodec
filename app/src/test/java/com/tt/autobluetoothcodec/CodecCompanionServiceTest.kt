@@ -77,29 +77,28 @@ class CodecCompanionServiceTest {
     }
 
     @Test
-    fun noPreferredCodecResolvesWithoutReceiver() {
+    fun noPreferredCodecRegistersNoReceiver() {
         val before = receiverCount()
         service.onDeviceAppeared(ADDRESS)
-        val uid = operations(EventType.DEVICE_APPEARED).single().opUID!!
-        assertEquals(EventType.NO_PREFERRED_CODEC, resolution(uid)!!.type)
+        assertEquals(ADDRESS, operations(EventType.DEVICE_APPEARED).single().device!!.address)
         assertEquals(before, receiverCount())
         assertEquals(0, a2dp.connectCount)
     }
 
     @Test
-    fun appearingAppliesAndRegistersTheReceiverOnce() {
+    fun appearingRegistersTheReceiverOnceWithoutApplying() {
         PreferredCodecStore.set(context, device(), sbc())
         val before = receiverCount()
+        // A2DP is connected already, still only A2DP connecting applies the preferred codec
         service.onDeviceAppeared(ADDRESS)
         runFor(VERIFY_MILLIS)
         assertEquals(before + 1, receiverCount())
         service.onDeviceAppeared(ADDRESS)
         runFor(VERIFY_MILLIS)
         assertEquals(before + 1, receiverCount())
-        val appeared = operations(EventType.DEVICE_APPEARED)
-        assertEquals(2, appeared.size)
-        for (trigger in appeared)
-            assertEquals(EventType.CODEC_VERIFIED, resolution(trigger.opUID!!)!!.type)
+        assertEquals(2, operations(EventType.DEVICE_APPEARED).size)
+        assertTrue(events.all { it.opUID == null })
+        assertTrue(a2dp.setCalls.isEmpty())
     }
 
     @Test
@@ -121,15 +120,15 @@ class CodecCompanionServiceTest {
         PreferredCodecStore.set(context, device(), sbc())
         a2dp.onSet = { _, _ -> }
         service.onDeviceAppeared(ADDRESS)
-        runPending()
+        a2dpConnected(ADDRESS)
         service.onDeviceDisappeared(ADDRESS.lowercase())
-        val uid = operations(EventType.DEVICE_APPEARED).single().opUID!!
+        val uid = operations(EventType.A2DP_CONNECTED).single { it.message == "companion service" }.opUID!!
         assertEquals(EventType.CANCELLED, resolution(uid)!!.type)
         assertEquals("device disappeared", resolution(uid)!!.message)
         assertEquals(ADDRESS, operations(EventType.DEVICE_DISAPPEARED).single().device!!.address)
-        // No longer present, so A2DP connecting doesn't apply
+        // No longer present, so A2DP connecting again doesn't apply
         a2dpConnected(ADDRESS)
-        assertTrue(operations(EventType.A2DP_CONNECTED).none { it.message == "companion service" })
+        assertEquals(1, operations(EventType.A2DP_CONNECTED).count { it.message == "companion service" })
     }
 
     @Test
@@ -162,9 +161,7 @@ class CodecCompanionServiceTest {
         val id = link()
         presence(id, DevicePresenceEvent.EVENT_BT_CONNECTED)
         presence(id, DevicePresenceEvent.EVENT_BLE_APPEARED)
-        val appeared = operations(EventType.DEVICE_APPEARED).single()
-        assertEquals("Bluetooth", appeared.message)
-        assertEquals(EventType.CODEC_VERIFIED, resolution(appeared.opUID!!)!!.type)
+        assertEquals("Bluetooth", operations(EventType.DEVICE_APPEARED).single().message)
     }
 
     @Test

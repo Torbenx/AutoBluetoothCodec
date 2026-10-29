@@ -173,14 +173,18 @@ class AppLog:
                                    f"log tail: {[e['type'] for e in self.read()[-10:]]}")
             time.sleep(interval)
 
-    def wait_for_event(self, type_, after=-1, timeout=30.0, interval=0.5):
+    def wait_for_event(self, type_, after=-1, device=None, timeout=30.0, interval=0.5):
         end = time.time() + timeout
         while True:
             for event in self.events_after(after):
-                if event["type"] == type_:
-                    return event
+                if event["type"] != type_:
+                    continue
+                if device is not None and (event.get("device") or {}).get("address", "").upper() != device.upper():
+                    continue
+                return event
             if time.time() >= end:
-                raise TimeoutError(f"no {type_} after seq {after} within {timeout:.0f} s")
+                raise TimeoutError(f"no {type_} for {device or 'any device'} after seq {after} within {timeout:.0f} s; "
+                                   f"log tail: {[e['type'] for e in self.read()[-10:]]}")
             time.sleep(interval)
 
 

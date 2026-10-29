@@ -122,6 +122,7 @@ class LogScreenTest {
     @Test
     fun standaloneEventTexts() {
         show(listOf(
+            event(EventType.DEVICE_APPEARED),
             event(EventType.DEVICE_DISAPPEARED),
             event(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, actual = sbc),
             event(EventType.READ_FAILED, message = "java.lang.SecurityException: refused"),
@@ -133,6 +134,7 @@ class LogScreenTest {
             event(EventType.TEST_LABEL, device = null, message = "step 1"),
         ))
         for (text in listOf(
+            "Device connected",
             "Device disconnected",
             "App observed an external codec change: $sbcText",
             "Couldn't read the codec",
@@ -186,7 +188,6 @@ class LogScreenTest {
     @Test
     fun triggerTexts() {
         show(listOf(
-            operation(EventType.DEVICE_APPEARED, EventType.NOT_CONNECTED),
             operation(EventType.USER_SET_CODEC, EventType.CODEC_VERIFIED, config = sbc, actual = sbc),
             operation(EventType.USER_RESTORE_PREFERRED, EventType.CODEC_VERIFIED, config = sbc, actual = sbc),
             operation(EventType.USER_SAVE_PREFERRED, EventType.PREFERRED_SAVED, config = sbc),
@@ -194,7 +195,6 @@ class LogScreenTest {
             operation(EventType.A2DP_CONNECTED, null),
         ).flatten())
         for (text in listOf(
-            "Device connected → Audio not connected yet",
             "Codec chosen: $sbcText → Codec applied: $sbcText",
             "Restoring preferred codec: $sbcText → Codec applied: $sbcText",
             "Saving preferred codec: $sbcText → Preferred codec saved",
