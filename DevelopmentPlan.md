@@ -13,8 +13,9 @@
      * Target device
      * Trigger of the event. For example Ui update, device connected, validate device config, ...
    * Profile Log Activity (Done)
-   * Setup testing using Mobly
-   * Add open source licences somewhere
+   * Setup testing using Mobly (Done)
+   * Add open source licences somewhere (Done)
+   * There is potential issue with applying the codec after a restart when A2DP connects before the first unlock and the app nevers sees the broadcast.
 
 2. Polish UI
 
