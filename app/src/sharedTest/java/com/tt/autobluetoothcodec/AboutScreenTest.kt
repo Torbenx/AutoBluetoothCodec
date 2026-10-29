@@ -7,6 +7,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.mikepenz.aboutlibraries.Libs
+import com.mikepenz.aboutlibraries.util.withContext
 import com.tt.autobluetoothcodec.UiTestData.RecordingActions
 import com.tt.autobluetoothcodec.UiTestData.device
 import com.tt.autobluetoothcodec.UiTestData.state
@@ -50,5 +53,14 @@ class AboutScreenTest {
             listOf("openUrl $REPOSITORY_URL", "openUrl $LICENSE_URL", "openLicenses", "back"),
             actions.calls
         )
+    }
+
+    @Test
+    fun theThirdPartyLicensesAreCollected() {
+        // Collected by the AboutLibraries Gradle plugin at build time, the screen shows an empty list without them
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val libraries = Libs.Builder().withContext(context).build().libraries
+        val material3 = libraries.single { it.uniqueId == "androidx.compose.material3:material3-android" }
+        assertEquals(listOf("Apache-2.0"), material3.licenses.map { it.spdxId })
     }
 }

@@ -421,4 +421,18 @@ class LogScreenTest {
         compose.onNodeWithTag("share_log").assertDoesNotExist()
         compose.onNodeWithTag("log_menu").assertDoesNotExist()
     }
+
+    @Test
+    fun aLoadingFileShowsNothingYet() {
+        compose.setContent { LogScreen(null, today, actions, fileName = "export.jsonl") }
+        compose.onNodeWithText("export.jsonl").assertExists()
+        compose.onNodeWithText("No events in this file").assertDoesNotExist()
+        list.assertDoesNotExist()
+    }
+
+    @Test
+    fun anEmptyFile() {
+        compose.setContent { LogScreen(emptyList(), today, actions, fileName = "export.jsonl") }
+        compose.onNodeWithText("No events in this file").assertExists()
+    }
 }

@@ -241,7 +241,7 @@ levels and fakes that a phone can't provide.
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
 | K5 | `CodecCompanionService`: no preferred codec resolves `NO_PREFERRED_CODEC` without a receiver; appearing applies and registers the receiver once; A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |
 | K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
-| K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines | P1 |
+| K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines; disabling deletes the log, stays disabled after a restart and keeps operations that span it out of the log | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
 
 The main screen's own logic stays in `MainActivity` (D1, D13), with its own
@@ -268,9 +268,9 @@ the UI polish. The same tests run on the JVM and on every phone
 | V8 | Log texts, with the sample log: the text of every event type, both validation texts, duration thresholds, interrupted operations | P1 |
 | V9 | Log structure: day headers, grouping of interleaved operations and of elements whose trigger was trimmed, standalone rows, "in progress", empty state, expand and collapse, JSON on long press, expanded state kept while scrolling | P1 |
 | V10 | Log screen updates while it's open | P2 |
-| V11 | Clear dialog (open operations stay), share dialog (the chosen mode is exported), disable logging dialog and enabling again; an opened log file is read only and Open Log is only in debug builds | P2 |
+| V11 | Clear dialog (open operations stay), share dialog (the chosen mode is exported), disable logging dialog and enabling again; an opened log file is read only, shows nothing while loading and has its own empty text, and Open Log is only in debug builds | P2 |
 | V12 | Screenshots in light and dark, font scales, landscape, screen sizes; after the UI polish (D5) | P3 |
-| V13 | About screen: reached from the main screen's menu; the version, and the source code, license and third-party licenses items open their targets | P2 |
+| V13 | About screen: reached from the main screen's menu; the version, and the source code, license and third-party licenses items open their targets; the build collected the third-party licenses | P2 |
 
 ### L3 Bluetooth logic tests
 

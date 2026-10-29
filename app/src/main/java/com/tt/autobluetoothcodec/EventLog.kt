@@ -50,16 +50,25 @@ class EventLog private constructor(context: Context) {
         }
 
         /**
-         * Deletes the log, for tests. [get] loads it again from now on. Waits for the pending writes
-         * first, so they don't recreate the file.
+         * Drops the log as if the process restarted, for tests. [get] loads it again from the file and
+         * the settings. Waits for the pending writes first.
          */
         @VisibleForTesting
-        fun resetForTest(context: Context) {
+        fun restartForTest() {
             instance?.let { log ->
                 log.executor.submit {}.get()
                 log.executor.shutdown()
             }
             instance = null
+        }
+
+        /**
+         * Deletes the log and its settings, for tests. [get] loads it again from now on. Waits for the pending writes
+         * first, so they don't recreate the file.
+         */
+        @VisibleForTesting
+        fun resetForTest(context: Context) {
+            restartForTest()
             AtomicFile(File(File(context.applicationContext.filesDir, DIRECTORY), FILE_NAME)).delete()
             preferences(context).edit().clear().commit()
         }

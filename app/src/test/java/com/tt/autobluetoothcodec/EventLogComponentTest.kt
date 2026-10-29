@@ -13,6 +13,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -124,6 +125,49 @@ class EventLogComponentTest {
         whileDisabled.resolve(EventType.CODEC_VERIFIED)
         assertEquals(listOf(EventType.TEST_LABEL), log.events.value.map { it.type })
         assertEquals(1, lines().size)
+    }
+
+    @Test
+    fun operationsSpanningADisabledPeriodStayOutOfTheLog() {
+        val before = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
+        log.setEnabled(false)
+        val during = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
+        log.setEnabled(true)
+        before.log(EventType.SET_CODEC_CONFIG)
+        during.log(EventType.SET_CODEC_CONFIG)
+        before.resolve(EventType.CODEC_VERIFIED)
+        during.resolve(EventType.CODEC_VERIFIED)
+        assertEquals(emptyList<LogEvent>(), log.events.value)
+        // An operation begun after enabling is logged again
+        val after = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
+        after.log(EventType.SET_CODEC_CONFIG)
+        after.resolve(EventType.CODEC_VERIFIED)
+        assertEquals(listOf(after.uid, after.uid, after.uid), log.events.value.map { it.opUID })
+        assertEquals(3, lines().size)
+    }
+
+    @Test
+    fun loggingStaysDisabledAfterARestart() {
+        log.setEnabled(false)
+        EventLog.restartForTest()
+        assertFalse(log.enabled.value)
+        log.log(EventType.TEST_LABEL, message = "x")
+        assertEquals(emptyList<LogEvent>(), log.events.value)
+        flushLog()
+        assertFalse(file.exists())
+        log.setEnabled(true)
+        EventLog.restartForTest()
+        assertTrue(log.enabled.value)
+    }
+
+    @Test
+    fun aFileLeftWhileDisabledIsDeletedOnLoad() {
+        log.setEnabled(false)
+        EventLog.restartForTest()
+        // The process died before the background thread deleted it
+        writeFile(event(0, EventType.TEST_LABEL))
+        assertEquals(emptyList<LogEvent>(), log.events.value)
+        assertFalse(file.exists())
     }
 
     @Test
