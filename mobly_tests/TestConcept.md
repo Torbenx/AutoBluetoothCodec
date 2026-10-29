@@ -155,8 +155,11 @@ Pitfalls the harness has to handle:
   system binds the service again within about 3 s and delivers
   `onDeviceAppeared` again; on the API 32 Pixel it doesn't (C3).
 - Mobly calls `on_fail` after `teardown_test`, when the restore has already
-  reset the app, so `BaselineTest` collects the artifacts in its teardown and
-  drops them again for tests that passed.
+  reset the app, so `BaselineTest` collects the artifacts in its teardown,
+  before the restore. Mobly calls the teardown in a `finally` block, so the
+  exception the setup or test raised tells it the test is failing; broken
+  invariants are found in the teardown itself. Passing tests don't pay for the
+  UI dump and screenshot, about 6 s each.
 - The phones' clocks differ (the API 28 Pixel is in 2019). Events are ordered
   by `seq` and labels, never compared with the host's time.
 - `dumpsys bluetooth_manager` has several per-device tables, like the AVRCP

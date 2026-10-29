@@ -5,7 +5,7 @@ and one Headset, see testbed.yaml.
 """
 
 import pathlib
-import shutil
+import sys
 import time
 
 from mobly import asserts
@@ -19,6 +19,17 @@ from lib import baseline
 from lib import bt_oracle
 from lib import device_state
 from lib import headset as headset_controller
+
+
+def is_failing():
+    """Whether the test is failing, asked from teardown_test.
+
+    Mobly calls the teardown in a finally block, so the exception the setup or
+    the test raised is still the one being handled. Passes and skips are
+    exceptions too.
+    """
+    error = sys.exc_info()[1]
+    return error is not None and not isinstance(error, (signals.TestPass, signals.TestSkip))
 
 
 class DeviceTest(base_test.BaseTestClass):
@@ -51,13 +62,6 @@ class DeviceTest(base_test.BaseTestClass):
     def on_fail(self, record):
         if getattr(self, "_artifacts", None) is None:
             self.collect_artifacts()
-
-    def on_pass(self, record):
-        if getattr(self, "_artifacts", None) is not None:
-            shutil.rmtree(self._artifacts, ignore_errors=True)
-
-    def on_skip(self, record):
-        self.on_pass(record)
 
     def check_invariants(self, settle=10.0):
         """The log's problems at the end of a test, 6.5: its structure, open and interrupted
@@ -148,8 +152,12 @@ class BaselineTest(DeviceTest):
     def teardown_test(self):
         self._previous_test = self.current_test_info.name
         # Mobly only calls on_fail after the teardown, when the restore has reset the app
-        self.collect_artifacts()
+        failing = is_failing()
+        if failing:
+            self.collect_artifacts()
         invariants = self.check_invariants()
+        if invariants and not failing:
+            self.collect_artifacts()
         try:
             remaining = self.baseline.restore()
             if remaining:
