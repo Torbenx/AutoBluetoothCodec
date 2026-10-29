@@ -166,10 +166,20 @@ def reboot(wait):
 
 def wait_until_back(wait):
     """Waits for a rebooting 5K to leave USB and answer again, up to [wait] s."""
+    wait_left_usb()
+    wait_answering(wait)
+
+
+def wait_left_usb():
+    """Waits up to 5 s for a rebooting 5K to leave USB."""
     end = time.time() + 5
     while find_path() and time.time() < end:
         time.sleep(0.1)
     print("device left USB" if not find_path() else "warning: device never left USB")
+
+
+def wait_answering(wait):
+    """Waits up to [wait] s for the 5K to answer on USB, after it left for a reboot."""
     end = time.time() + wait
     while True:
         # Firmware re-enumerates on USB slightly before it answers commands.

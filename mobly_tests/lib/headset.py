@@ -86,9 +86,23 @@ class QudelixHeadset(Headset):
             # The tool exits on errors, which must not end the test run
             raise RuntimeError(f"Qudelix: {e}") from None
 
-    def _reboot(self):
+    # Usually the phone shows A2DP down within 1.3 s of the reboot; the S24 once took 6 s
+    DISCONNECT_TIMEOUT = 15.0
+
+    def _reboot(self, adb):
+        """Reboots the 5K and returns once the phone has seen A2DP go down and the 5K answers again.
+
+        Until the phone notices, it still reports the old connection, and a wait
+        for A2DP connected would return at once. Waiting for the 5K on USB
+        first could miss the disconnect: if USB took longer than usual, A2DP
+        would be back already. Polling from the start of the reboot sees all of
+        it, at least 5 s on every phone (section 12).
+        """
         try:
-            qudelix5k.reboot(wait=15.0)
+            qudelix5k.reboot(wait=0)
+            qudelix5k.wait_left_usb()
+            bt_oracle.wait_connected(adb, self.address, timeout=self.DISCONNECT_TIMEOUT, connected=False)
+            qudelix5k.wait_answering(wait=15.0)
         except SystemExit as e:
             raise RuntimeError(f"Qudelix: {e}") from None
 
@@ -111,18 +125,12 @@ class QudelixHeadset(Headset):
                 device.close()
             time.sleep(1)
 
-    # Usually the phone shows A2DP down by the time the 5K answers on USB again; the S24 once took 6 s
-    DISCONNECT_TIMEOUT = 15.0
-
     def reconnect(self, adb):
         # A reboot is a full reconnect on every phone, about 3 s sooner than bt-off, 5 s and
         # normal (D21). It keeps the mode, so a headset left in another one, by an aborted run
         # for example, is set to normal first.
         self._set("normal")
-        self._reboot()
-        # Until the phone notices, it still reports the old connection, and a wait for A2DP
-        # connected would return at once
-        bt_oracle.wait_connected(adb, self.address, timeout=self.DISCONNECT_TIMEOUT, connected=False)
+        self._reboot(adb)
 
     def disconnect_a2dp(self):
         self._set("no-a2dp")

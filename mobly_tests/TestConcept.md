@@ -963,7 +963,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   A2DP is down within 1.3 s either way and dumpsys shows it disconnected by
   the time the reboot returns. Once the S24 still showed the old connection
   about 6 s after the reboot started, 1–2 s after the 5K answered on USB
-  again, so `reconnect()` waits for dumpsys to show A2DP down. The codec comes back as the phone's own choice
+  again, so `reconnect()` waits for dumpsys to show A2DP down. It polls from
+  the start of the reboot, before waiting for the 5K on USB, so a slow USB
+  can't let A2DP come back unseen. The codec comes back as the phone's own choice
   every time; A2DP is back 1–3.5 s sooner (7–8 s on the Pixels, 11–12 s on
   the S24). With the app's process alive, neither makes the app log
   `DEVICE_APPEARED` on API 32 or 36. After C2 restarts the process, the S24
