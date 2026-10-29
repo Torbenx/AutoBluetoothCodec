@@ -1,0 +1,54 @@
+package com.tt.autobluetoothcodec
+
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.tt.autobluetoothcodec.UiTestData.RecordingActions
+import com.tt.autobluetoothcodec.UiTestData.device
+import com.tt.autobluetoothcodec.UiTestData.state
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/** V13 of the test concept: the about screen and the way to it from the main screen's menu. */
+@RunWith(AndroidJUnit4::class)
+class AboutScreenTest {
+    @get:Rule
+    val compose = createComposeRule()
+
+    private val actions = object : AboutScreenActions {
+        val calls = ArrayList<String>()
+        override fun back() { calls.add("back") }
+        override fun openUrl(url: String) { calls.add("openUrl $url") }
+        override fun openLicenses() { calls.add("openLicenses") }
+    }
+
+    @Test
+    fun theMainMenuOpensTheAboutScreen() {
+        val mainActions = RecordingActions()
+        compose.setContent { MainScreen(state(device()), mainActions) }
+        compose.onNodeWithTag("app_menu").performClick()
+        compose.onNodeWithTag("open_about").performClick()
+        assertEquals(listOf("openAbout"), mainActions.calls)
+    }
+
+    @Test
+    fun itemsOpenTheirTargets() {
+        compose.setContent { AboutScreen("1.0-abc1234", actions) }
+        compose.onNodeWithTag("app_version").assertTextEquals("Version 1.0-abc1234")
+        // Scrolled into view since the items may not fit on the screen
+        compose.onNodeWithTag("source_code").performScrollTo().performClick()
+        compose.onNodeWithTag("license").performScrollTo().performClick()
+        compose.onNodeWithTag("third_party_licenses").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Back").performClick()
+        assertEquals(
+            listOf("openUrl $REPOSITORY_URL", "openUrl $LICENSE_URL", "openLicenses", "back"),
+            actions.calls
+        )
+    }
+}

@@ -123,6 +123,7 @@ internal interface MainScreenActions {
     fun requestPermission()
     fun openAppSettings()
     fun openLog()
+    fun openAbout()
     fun setCodec(device: BluetoothDevice, config: CodecConfig)
     fun savePreferred(device: BluetoothDevice, config: CodecConfig)
     fun restorePreferred(device: BluetoothDevice, config: CodecConfig)
@@ -171,6 +172,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         override fun requestPermission() = requestBluetoothPermission()
         override fun openAppSettings() = this@MainActivity.openAppSettings()
         override fun openLog() = startActivity(Intent(this@MainActivity, LogActivity::class.java))
+        override fun openAbout() = startActivity(Intent(this@MainActivity, AboutActivity::class.java))
         override fun setCodec(device: BluetoothDevice, config: CodecConfig) = setCodecConfig(device, config)
         override fun savePreferred(device: BluetoothDevice, config: CodecConfig) = savePreferredConfig(device, config)
         override fun restorePreferred(device: BluetoothDevice, config: CodecConfig) = restorePreferredConfig(device, config)
@@ -1057,7 +1059,7 @@ private fun PermissionRequired(modifier: Modifier, permissionState: PermissionSt
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun AppMenu(onOpenLog: () -> Unit) {
+private fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("app_menu")) {
@@ -1072,6 +1074,14 @@ private fun AppMenu(onOpenLog: () -> Unit) {
                 onClick = {
                     expanded = false
                     onOpenLog()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("About") },
+                modifier = Modifier.testTag("open_about"),
+                onClick = {
+                    expanded = false
+                    onOpenAbout()
                 }
             )
         }
@@ -1091,7 +1101,7 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions) {
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
-                actions = { AppMenu(actions::openLog) }
+                actions = { AppMenu(actions::openLog, actions::openAbout) }
             )
         },
         // Also keeps the content clear of display cutouts in landscape

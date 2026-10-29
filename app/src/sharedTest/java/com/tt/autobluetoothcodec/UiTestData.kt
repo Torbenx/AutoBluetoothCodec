@@ -81,6 +81,7 @@ internal object UiTestData {
         override fun requestPermission() { calls.add("requestPermission") }
         override fun openAppSettings() { calls.add("openAppSettings") }
         override fun openLog() { calls.add("openLog") }
+        override fun openAbout() { calls.add("openAbout") }
         override fun setCodec(device: BluetoothDevice, config: CodecConfig) { calls.add("setCodec ${device.address} ${config.describe()}") }
         override fun savePreferred(device: BluetoothDevice, config: CodecConfig) { calls.add("savePreferred ${device.address} ${config.describe()}") }
         override fun restorePreferred(device: BluetoothDevice, config: CodecConfig) { calls.add("restorePreferred ${device.address} ${config.describe()}") }
