@@ -1,11 +1,16 @@
 package com.tt.autobluetoothcodec
 
+import android.content.ClipData
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -35,10 +40,12 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -73,7 +80,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.IntentCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -89,27 +102,91 @@ import java.util.Locale
  * Shows the [EventLog], newest first. An operation is shown as one entry, collapsed to a one line
  * summary. Tapping it expands it to all its events, tapping it again collapses it. Long pressing an
  * event shows its JSON.
+ *
+ * Started with [EXTRA_LOG_FILE], it shows a log file instead, for example an export of another phone.
  */
 class LogActivity : ComponentActivity() {
     companion object {
         private const val TAG = "LogActivity"
+
+        /** The content URI of a JSON Lines log file to show instead of the app's log. */
+        const val EXTRA_LOG_FILE = "com.tt.autobluetoothcodec.extra.LOG_FILE"
     }
 
     private val log by lazy { EventLog.get(this) }
+
+    // Development options are only shown in debuggable builds
+    private val showDevelopmentOptions by lazy {
+        (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
+
+    private val logFile by lazy { IntentCompat.getParcelableExtra(intent, EXTRA_LOG_FILE, Uri::class.java) }
+    private var fileName by mutableStateOf<String?>(null)
+    private var fileEvents by mutableStateOf<List<LogEvent>?>(null)
 
     private val actions = object : LogScreenActions {
         override fun back() = finish()
         override fun share(mode: LogExport.Mode) = shareLog(mode)
         override fun clear() = log.clear()
+        override fun setLoggingEnabled(enabled: Boolean) = log.setEnabled(enabled)
+        override fun openLogFile() = openFileLauncher.launch(arrayOf("*/*"))
+    }
+
+    private val openFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null)
+            return@registerForActivityResult
+        // The picker's grant ends with this activity, the clip data grants the new one its own
+        val intent = Intent(this, LogActivity::class.java)
+            .putExtra(EXTRA_LOG_FILE, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        intent.clipData = ClipData.newRawUri(null, uri)
+        startActivity(intent)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableLightEdgeToEdge()
         super.onCreate(savedInstanceState)
+        val file = logFile
+        if (file != null)
+            loadFile(file)
         setContent {
-            val events by log.events.collectAsState()
-            LogScreen(events, LocalDate.now(), actions)
+            if (file != null) {
+                LogScreen(fileEvents, LocalDate.now(), actions, fileName = fileName ?: "Log file")
+            } else {
+                val events by log.events.collectAsState()
+                val enabled by log.enabled.collectAsState()
+                LogScreen(events, LocalDate.now(), actions, enabled, showDevelopmentOptions)
+            }
         }
+    }
+
+    private fun loadFile(uri: Uri) {
+        lifecycleScope.launch {
+            val (name, events) = try {
+                withContext(Dispatchers.IO) {
+                    val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                        ?.use { if (it.moveToFirst()) it.getString(0) else null }
+                    val lines = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readLines() }
+                        ?: throw IOException("no stream for $uri")
+                    name to EventLog.parse(lines)
+                }
+            } catch (e: IOException) {
+                failLoading(e)
+                return@launch
+            } catch (e: SecurityException) {
+                // The grant is gone, for example after the process was restarted
+                failLoading(e)
+                return@launch
+            }
+            fileName = name
+            fileEvents = events
+        }
+    }
+
+    private fun failLoading(e: Exception) {
+        Log.e(TAG, "reading the log file failed", e)
+        Toast.makeText(this, "Reading the log file failed", Toast.LENGTH_SHORT).show()
+        finish()
     }
 
     private fun shareLog(mode: LogExport.Mode) {
@@ -166,6 +243,8 @@ internal interface LogScreenActions {
     fun back()
     fun share(mode: LogExport.Mode)
     fun clear()
+    fun setLoggingEnabled(enabled: Boolean)
+    fun openLogFile()
 }
 
 /** The events of an operation in order, or a single standalone event. */
@@ -516,29 +595,136 @@ private fun ClearDialog(onDismiss: () -> Unit, onClear: () -> Unit) {
     )
 }
 
-/** The log screen, [events] newest first. [today] decides which day is shown as today. */
+@Composable
+private fun DisableLoggingDialog(onDismiss: () -> Unit, onDisable: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Disable logging?") },
+        text = {
+            Text(
+                "The log is only kept on this phone and is never shared automatically, only when you share it " +
+                        "yourself. It's limited to the last ${EventLog.MAX_EVENTS} events and is primarily meant " +
+                        "for diagnosing problems.\n\nDisabling logging deletes all logged events."
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onDismiss()
+                onDisable()
+            }) { Text("Delete & Disable") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Keep enabled") }
+        }
+    )
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun LogMenu(
+    canClear: Boolean,
+    loggingEnabled: Boolean,
+    showDevelopmentOptions: Boolean,
+    onClear: () -> Unit,
+    onDisableLogging: () -> Unit,
+    onEnableLogging: () -> Unit,
+    onOpenFile: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("log_menu")) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+        }
+        // A menu is a popup, outside the Scaffold that exposes the test tags to UiAutomator
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+            modifier = Modifier.semantics { testTagsAsResourceId = true }) {
+            DropdownMenuItem(
+                text = { Text("Clear log") },
+                enabled = canClear,
+                modifier = Modifier.testTag("clear_log"),
+                onClick = {
+                    expanded = false
+                    onClear()
+                }
+            )
+            if (loggingEnabled) {
+                DropdownMenuItem(
+                    text = { Text("Disable logging") },
+                    modifier = Modifier.testTag("disable_logging"),
+                    onClick = {
+                        expanded = false
+                        onDisableLogging()
+                    }
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("Enable logging") },
+                    modifier = Modifier.testTag("enable_logging"),
+                    onClick = {
+                        expanded = false
+                        onEnableLogging()
+                    }
+                )
+            }
+            if (showDevelopmentOptions) {
+                DropdownMenuItem(
+                    text = { Text("Open Log (Debug)") },
+                    modifier = Modifier.testTag("open_log_file"),
+                    onClick = {
+                        expanded = false
+                        onOpenFile()
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The log screen, [events] newest first, null while they're loading. [today] decides which day is
+ * shown as today. With a [fileName] it shows the events of that file instead of the app's log, read
+ * only.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScreenActions) {
+internal fun LogScreen(
+    events: List<LogEvent>?,
+    today: LocalDate,
+    actions: LogScreenActions,
+    loggingEnabled: Boolean = true,
+    showDevelopmentOptions: Boolean = false,
+    fileName: String? = null,
+) {
     var showExportDialog by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var showDisableDialog by remember { mutableStateOf(false) }
+    val ownLog = fileName == null
     Scaffold(
         // Lets UiAutomator find the elements by their test tags
         modifier = Modifier.semantics { testTagsAsResourceId = true },
         topBar = {
             TopAppBar(
-                title = { Text("Log") },
+                title = { Text(fileName ?: "Log", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = actions::back) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showExportDialog = true }, enabled = events.isNotEmpty(), modifier = Modifier.testTag("share_log")) {
-                        Icon(Icons.Default.Share, contentDescription = "Share log")
-                    }
-                    IconButton(onClick = { showClearDialog = true }, enabled = events.isNotEmpty(), modifier = Modifier.testTag("clear_log")) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear log")
+                    // An opened file is only shown, another one is opened from the app's log
+                    if (ownLog) {
+                        IconButton(onClick = { showExportDialog = true }, enabled = !events.isNullOrEmpty(), modifier = Modifier.testTag("share_log")) {
+                            Icon(Icons.Default.Share, contentDescription = "Share log")
+                        }
+                        LogMenu(
+                            canClear = !events.isNullOrEmpty(),
+                            loggingEnabled = loggingEnabled,
+                            showDevelopmentOptions = showDevelopmentOptions,
+                            onClear = { showClearDialog = true },
+                            onDisableLogging = { showDisableDialog = true },
+                            onEnableLogging = { actions.setLoggingEnabled(true) },
+                            onOpenFile = actions::openLogFile
+                        )
                     }
                 }
             )
@@ -555,10 +741,17 @@ internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScr
                 end = innerPadding.calculateEndPadding(layoutDirection)
             )
         ) {
+            if (events == null)
+                return@Column
             val entries = remember(events) { buildEntries(events).reversed() }
             if (entries.isEmpty()) {
+                val text = when {
+                    !ownLog -> "No events in this file"
+                    !loggingEnabled -> "Logging is disabled"
+                    else -> "No events logged yet"
+                }
                 Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text("No events logged yet", style = MaterialTheme.typography.bodyLarge)
+                    Text(text, style = MaterialTheme.typography.bodyLarge)
                 }
                 return@Column
             }
@@ -590,4 +783,6 @@ internal fun LogScreen(events: List<LogEvent>, today: LocalDate, actions: LogScr
         ExportDialog(onDismiss = { showExportDialog = false }, onShare = actions::share)
     if (showClearDialog)
         ClearDialog(onDismiss = { showClearDialog = false }, onClear = actions::clear)
+    if (showDisableDialog)
+        DisableLoggingDialog(onDismiss = { showDisableDialog = false }, onDisable = { actions.setLoggingEnabled(false) })
 }

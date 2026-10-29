@@ -268,7 +268,7 @@ the UI polish. The same tests run on the JVM and on every phone
 | V8 | Log texts, with the sample log: the text of every event type, both validation texts, duration thresholds, interrupted operations | P1 |
 | V9 | Log structure: day headers, grouping of interleaved operations and of elements whose trigger was trimmed, standalone rows, "in progress", empty state, expand and collapse, JSON on long press, expanded state kept while scrolling | P1 |
 | V10 | Log screen updates while it's open | P2 |
-| V11 | Clear dialog (open operations stay) and share dialog (the chosen mode is exported) | P2 |
+| V11 | Clear dialog (open operations stay), share dialog (the chosen mode is exported), disable logging dialog and enabling again; an opened log file is read only and Open Log is only in debug builds | P2 |
 | V12 | Screenshots in light and dark, font scales, landscape, screen sizes; after the UI polish (D5) | P3 |
 
 ### L3 Bluetooth logic tests

@@ -23,6 +23,9 @@ import java.util.concurrent.Executors
  * the returned [Operation] logs its elements and its resolution. Breaking that structure is a bug,
  * it throws in debuggable builds and is logged to Logcat otherwise.
  *
+ * Logging can be disabled with [setEnabled], which deletes the log. While disabled, events only go to
+ * Logcat.
+ *
  * Must be used on the main thread. The file is written on a background thread, [flush] waits for it.
  */
 class EventLog private constructor(context: Context) {
@@ -32,6 +35,8 @@ class EventLog private constructor(context: Context) {
         // Excluded from backups by backup_rules.xml and data_extraction_rules.xml
         const val DIRECTORY = "logs"
         const val FILE_NAME = "event_log.jsonl"
+        private const val PREFERENCES_NAME = "event_log"
+        private const val KEY_ENABLED = "enabled"
 
         val json = Json {
             ignoreUnknownKeys = true
@@ -56,6 +61,7 @@ class EventLog private constructor(context: Context) {
             }
             instance = null
             AtomicFile(File(File(context.applicationContext.filesDir, DIRECTORY), FILE_NAME)).delete()
+            preferences(context).edit().clear().commit()
         }
 
         /** Parses the lines of the log file, skipping lines that can't be parsed. */
@@ -85,12 +91,18 @@ class EventLog private constructor(context: Context) {
             val resolved = events.filter { it.type.flow == OperationFlow.RESOLUTION }.mapNotNullTo(HashSet()) { it.opUID }
             return events.filter { it.type.flow == OperationFlow.TRIGGER && it.opUID !in resolved }
         }
+
+        private fun preferences(context: Context) =
+            context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     }
 
     private val debuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     private val file = AtomicFile(File(File(context.filesDir, DIRECTORY), FILE_NAME))
     private val executor = Executors.newSingleThreadExecutor()
+    private val preferences = preferences(context)
     private val openOperations = HashSet<String>()
+    // Open operations whose trigger is in the log, the events of the others aren't logged
+    private val loggedOperations = HashSet<String>()
     private var nextSeq = 0L
     // Lines in the file, which may contain more events than are kept until it's rewritten
     private var fileLineCount = 0
@@ -98,8 +110,14 @@ class EventLog private constructor(context: Context) {
     private val mutableEvents = MutableStateFlow<List<LogEvent>>(emptyList())
     val events: StateFlow<List<LogEvent>> = mutableEvents.asStateFlow()
 
+    private val mutableEnabled = MutableStateFlow(preferences.getBoolean(KEY_ENABLED, true))
+    val enabled: StateFlow<Boolean> = mutableEnabled.asStateFlow()
+
     init {
         file.baseFile.parentFile?.mkdirs()
+        // Left over if the process died before deleting it
+        if (!enabled.value)
+            file.delete()
         val lines = try {
             file.openRead().bufferedReader().use { it.readLines() }
         } catch (e: FileNotFoundException) {
@@ -131,6 +149,8 @@ class EventLog private constructor(context: Context) {
         checkFlow(type, OperationFlow.TRIGGER)
         val operation = Operation(UUID.randomUUID().toString(), device)
         openOperations.add(operation.uid)
+        if (enabled.value)
+            loggedOperations.add(operation.uid)
         append(LogEvent(LogEvent.VERSION, nextSeq++, System.currentTimeMillis(), type,
             opUID = operation.uid, device = device, config = config, message = message))
         return operation
@@ -162,6 +182,23 @@ class EventLog private constructor(context: Context) {
         rewrite()
     }
 
+    /**
+     * Enables or disables logging. Disabling deletes all events, including those of open operations,
+     * whose later events aren't logged either.
+     */
+    fun setEnabled(enabled: Boolean) {
+        if (enabled == this.enabled.value)
+            return
+        preferences.edit().putBoolean(KEY_ENABLED, enabled).apply()
+        mutableEnabled.value = enabled
+        if (!enabled) {
+            loggedOperations.clear()
+            mutableEvents.value = emptyList()
+            fileLineCount = 0
+            executor.execute { file.delete() }
+        }
+    }
+
     /** Runs [action] on the background thread once all events logged so far are written. */
     fun flush(action: Runnable) {
         executor.execute(action)
@@ -178,8 +215,11 @@ class EventLog private constructor(context: Context) {
         Log.w(TAG, "log structure violated: $message")
     }
 
-    private fun append(event: LogEvent) {
+    /** Logs [event] to Logcat, and to the log if it's [logged] and logging is enabled. */
+    private fun append(event: LogEvent, logged: Boolean = true) {
         Log.i(TAG, toLogcat(event))
+        if (!logged || !enabled.value)
+            return
         mutableEvents.value = trim(mutableEvents.value + event, MAX_EVENTS)
         if (fileLineCount + 1 >= 2 * MAX_EVENTS) {
             rewrite()
@@ -251,7 +291,8 @@ class EventLog private constructor(context: Context) {
             if (!isOpen)
                 violation("$type logged to resolved operation $uid")
             append(LogEvent(LogEvent.VERSION, nextSeq++, System.currentTimeMillis(), type,
-                opUID = uid, device = device, config = config, actual = actual, attempt = attempt, message = message))
+                opUID = uid, device = device, config = config, actual = actual, attempt = attempt, message = message),
+                logged = uid in loggedOperations)
         }
 
         /** Ends the operation with a [OperationFlow.RESOLUTION] event. */
@@ -266,7 +307,8 @@ class EventLog private constructor(context: Context) {
             if (!openOperations.remove(uid))
                 violation("$type resolves operation $uid, which is resolved already")
             append(LogEvent(LogEvent.VERSION, nextSeq++, System.currentTimeMillis(), type,
-                opUID = uid, device = device, config = config, actual = actual, attempt = attempt, message = message))
+                opUID = uid, device = device, config = config, actual = actual, attempt = attempt, message = message),
+                logged = loggedOperations.remove(uid))
         }
     }
 }

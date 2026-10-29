@@ -10,6 +10,7 @@ import com.tt.autobluetoothcodec.TestSupport.ldac
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -103,6 +104,26 @@ class EventLogComponentTest {
         assertEquals(listOf(open.uid), log.events.value.map { it.opUID })
         open.resolve(EventType.CODEC_VERIFIED)
         assertEquals(2, EventLog.parse(lines()).size)
+    }
+
+    @Test
+    fun disablingDeletesTheLogAndStopsLogging() {
+        val open = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
+        log.log(EventType.TEST_LABEL, message = "x")
+        log.setEnabled(false)
+        assertEquals(emptyList<LogEvent>(), log.events.value)
+        open.resolve(EventType.CODEC_VERIFIED)
+        log.log(EventType.TEST_LABEL, message = "y")
+        val whileDisabled = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
+        assertEquals(emptyList<LogEvent>(), log.events.value)
+        flushLog()
+        assertFalse(file.exists())
+        // The events of an operation begun while disabled stay out of the log after enabling it
+        log.setEnabled(true)
+        log.log(EventType.TEST_LABEL, message = "z")
+        whileDisabled.resolve(EventType.CODEC_VERIFIED)
+        assertEquals(listOf(EventType.TEST_LABEL), log.events.value.map { it.type })
+        assertEquals(1, lines().size)
     }
 
     @Test

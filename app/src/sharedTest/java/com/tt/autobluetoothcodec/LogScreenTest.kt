@@ -51,6 +51,8 @@ class LogScreenTest {
         override fun back() { calls.add("back") }
         override fun share(mode: LogExport.Mode) { calls.add("share $mode") }
         override fun clear() { calls.add("clear") }
+        override fun setLoggingEnabled(enabled: Boolean) { calls.add("setLoggingEnabled $enabled") }
+        override fun openLogFile() { calls.add("openLogFile") }
     }
 
     private lateinit var locale: Locale
@@ -281,6 +283,7 @@ class LogScreenTest {
         show(emptyList())
         compose.onNodeWithText("No events logged yet").assertExists()
         compose.onNodeWithTag("share_log").assertIsNotEnabled()
+        compose.onNodeWithTag("log_menu").performClick()
         compose.onNodeWithTag("clear_log").assertIsNotEnabled()
     }
 
@@ -339,11 +342,13 @@ class LogScreenTest {
     @Test
     fun clearingAsksFirst() {
         show(listOf(event(EventType.TEST_LABEL, device = null, message = "step 1")))
+        compose.onNodeWithTag("log_menu").performClick()
         compose.onNodeWithTag("clear_log").performClick()
         compose.onNodeWithText("Clear log?").assertExists()
         compose.onNodeWithText("Cancel").performClick()
         compose.onNodeWithText("Clear log?").assertDoesNotExist()
         assertEquals(emptyList<String>(), actions.calls)
+        compose.onNodeWithTag("log_menu").performClick()
         compose.onNodeWithTag("clear_log").performClick()
         compose.onNodeWithText("Clear").performClick()
         compose.onNodeWithText("Clear log?").assertDoesNotExist()
@@ -361,5 +366,59 @@ class LogScreenTest {
         compose.onNodeWithTag("share_log").performClick()
         compose.onNodeWithText("Cancel").performClick()
         assertEquals(listOf("share ANONYMISED", "share FULL"), actions.calls)
+    }
+
+    @Test
+    fun disablingLoggingAsksFirst() {
+        show(listOf(event(EventType.TEST_LABEL, device = null, message = "step 1")))
+        compose.onNodeWithTag("log_menu").performClick()
+        compose.onNodeWithTag("disable_logging").performClick()
+        compose.onNodeWithText("Disable logging?").assertExists()
+        compose.onNodeWithText("${EventLog.MAX_EVENTS} events", substring = true).assertExists()
+        compose.onNodeWithText("Keep enabled").performClick()
+        compose.onNodeWithText("Disable logging?").assertDoesNotExist()
+        assertEquals(emptyList<String>(), actions.calls)
+        compose.onNodeWithTag("log_menu").performClick()
+        compose.onNodeWithTag("disable_logging").performClick()
+        compose.onNodeWithText("Delete & Disable").performClick()
+        compose.onNodeWithText("Disable logging?").assertDoesNotExist()
+        assertEquals(listOf("setLoggingEnabled false"), actions.calls)
+    }
+
+    @Test
+    fun disabledLoggingCanBeEnabled() {
+        compose.setContent { LogScreen(emptyList(), today, actions, loggingEnabled = false) }
+        compose.onNodeWithText("Logging is disabled").assertExists()
+        compose.onNodeWithTag("log_menu").performClick()
+        compose.onNodeWithTag("disable_logging").assertDoesNotExist()
+        compose.onNodeWithTag("enable_logging").performClick()
+        assertEquals(listOf("setLoggingEnabled true"), actions.calls)
+    }
+
+    @Test
+    fun onlyDebugBuildsOpenLogFiles() {
+        show(emptyList())
+        compose.onNodeWithTag("log_menu").performClick()
+        compose.onNodeWithTag("open_log_file").assertDoesNotExist()
+    }
+
+    @Test
+    fun debugBuildsOpenLogFiles() {
+        compose.setContent { LogScreen(emptyList(), today, actions, showDevelopmentOptions = true) }
+        compose.onNodeWithTag("log_menu").performClick()
+        compose.onNodeWithTag("open_log_file").performClick()
+        assertEquals(listOf("openLogFile"), actions.calls)
+    }
+
+    @Test
+    fun anOpenedFileIsReadOnly() {
+        compose.setContent {
+            LogScreen(listOf(event(EventType.TEST_LABEL, device = null, message = "step 1")), today, actions,
+                showDevelopmentOptions = true, fileName = "export.jsonl")
+        }
+        compose.onNodeWithText("export.jsonl").assertExists()
+        assertShown("Test: step 1")
+        compose.onNodeWithTag("share_log").assertDoesNotExist()
+        compose.onNodeWithTag("log_menu").assertDoesNotExist()
     }
 }
