@@ -6,7 +6,9 @@ stopped, permission granted without flags, headset linked and not observed,
 phone Bluetooth on, A2DP connected, headset normal, the codec the phone picks
 on its own (D11), screen on and unlocked with the launcher in front.
 
-check() reads every part, restore() puts back what differs and checks again.
+check() reads every part, repair() puts back what differs, and restore() does
+both. A check takes about 1.5 s, so a teardown only repairs: the next test's
+setup checks anyway.
 Whether the app process runs isn't part of the baseline; restoring ends it,
 so no state survives in memory.
 """
@@ -151,6 +153,14 @@ class Baseline:
 
     def restore(self):
         """Restores the baseline and returns what still differs, an empty list if nothing."""
+        self.repair()
+        return self.check()
+
+    def repair(self):
+        """Puts back the parts that differ, without checking the result.
+
+        For a caller that checks the baseline next anyway, like the next test's setup.
+        """
         adb = self.adb
         # Relinking first ends observing; any event it causes is deleted with the app data next.
         # API 31 and 32 don't show observing, so they're always relinked.
@@ -176,7 +186,6 @@ class Baseline:
             bt_oracle.wait_connected(adb, self.headset.address, timeout=CONNECT_TIMEOUT)
         if (foreground_activity(adb) or "").startswith(app.PACKAGE + "/"):
             app.go_home(adb)
-        return self.check()
 
     def record_own_codec(self):
         """Records the codec the phone picks on a full reconnect while the app has no preferred codec."""

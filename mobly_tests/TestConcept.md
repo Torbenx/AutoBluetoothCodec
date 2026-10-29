@@ -416,9 +416,10 @@ Not part of the baseline:
 - `setup_class` brings the phone into the baseline: it checks the build, then
   restores everything else.
 - Before each test, `baseline.check()` reads every part. They're all shell
-  reads, about 3 s together, and none of them starts the app process.
-- After each test, `baseline.restore()` puts back the parts that differ and
-  checks again.
+  reads, about 1.5 s together, and none of them starts the app process.
+- After each test, `baseline.repair()` puts back the parts that differ. It
+  doesn't check again, since the next test's check follows right after;
+  `baseline.restore()` is a repair followed by a check.
 - A difference found before a test means the previous test's restore missed
   something. It's repaired, and reported as a leak against that test. If the
   repair fails, the rest of the class is aborted instead of failing every test

@@ -125,15 +125,13 @@ class BaselineTest(DeviceTest):
         if installed != expected:
             asserts.abort_class(f"installed build {installed} isn't the working tree's {expected}")
         self.baseline = baseline.Baseline(self.adb, self.headset, self.sdk)
-        problems = self.baseline.restore()
-        if problems:
-            asserts.abort_class(f"the baseline can't be established: {problems}")
+        self.baseline.repair()
         codec = self.baseline.record_own_codec()
         self.ad.log.info("the phone's own codec is %s", codec)
-        # The reconnect mustn't make the app log anything, there is no preferred codec
+        # Also checks that the reconnect didn't make the app log anything, there is no preferred codec
         problems = self.baseline.check()
         if problems:
-            asserts.abort_class(f"the baseline isn't stable after recording the codec: {problems}")
+            asserts.abort_class(f"the baseline can't be established: {problems}")
 
     def setup_test(self):
         super().setup_test()
@@ -158,12 +156,10 @@ class BaselineTest(DeviceTest):
         invariants = self.check_invariants()
         if invariants and not failing:
             self.collect_artifacts()
+        # The next test's setup checks the result and reports what the repair missed as a leak
         try:
-            remaining = self.baseline.restore()
-            if remaining:
-                self.ad.log.warning("restoring after %s left %s", self._previous_test, remaining)
+            self.baseline.repair()
         except Exception:
-            # The next test's check reports it as a leak
             self.ad.log.exception("restoring the baseline after %s failed", self._previous_test)
         if invariants:
             raise signals.TestFailure(f"the log's invariants are broken: {invariants}")
