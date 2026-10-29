@@ -177,7 +177,7 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests, ot
     adb = AdbProxy(serial)
     print(f"{device_state.model(adb)} ({serial}), API {app.sdk(adb)}")
     directory.mkdir(parents=True, exist_ok=True)
-    problems = sanity.phone_problems(adb, other_serials)
+    problems = sanity.phone_problems(adb)
     if problems:
         return failed_sanity(problems)
     results = {}
@@ -188,7 +188,7 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests, ot
         return results
     config = mobly_config(directory, serial, phone, headset_name, headset)
     try:
-        problems = sanity.connect_problems(adb, headset_controller.create([headset])[0])
+        problems = sanity.connect_problems(adb, headset_controller.create([headset])[0], other_serials)
         if problems:
             results.update(failed_sanity(problems))
             return results

@@ -606,7 +606,8 @@ instead of failing every test:
 
 - The phone is on adb, plugged in, its screen on and unlocked, and
   `stay_on_while_plugged_in` includes USB.
-- No other phone on adb has Bluetooth on.
+- Before the device suites, not the L2 tests: no other phone on adb has
+  Bluetooth on.
 - The headset is paired with the phone.
 - With the phone's Bluetooth turned on, the headset connects over A2DP.
 - The installed build's version stamp matches the working tree.

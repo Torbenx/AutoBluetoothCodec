@@ -16,8 +16,8 @@ from lib import device_state
 STAY_ON_USB = 2
 
 
-def phone_problems(adb, other_serials=()):
-    """What keeps the phone from being tested, without touching its Bluetooth."""
+def phone_problems(adb):
+    """What keeps the phone from being tested, unrelated to Bluetooth."""
     problems = []
     if not device_state.is_powered(adb):
         problems.append("not plugged in")
@@ -29,9 +29,6 @@ def phone_problems(adb, other_serials=()):
         problems.append("screen off")
     if not device_state.is_unlocked(adb):
         problems.append("locked")
-    for serial in other_serials:
-        if device_state.is_bluetooth_on(AdbProxy(serial)):
-            problems.append(f"Bluetooth is on on {serial}, the headset could connect to it")
     return problems
 
 
@@ -41,14 +38,19 @@ def is_bonded(adb, address):
     return any(bt_oracle.same_device(a, address) for a in re.findall(r"[0-9A-FX]{2}(?::[0-9A-FX]{2}){5}", out.upper()))
 
 
-def connect_problems(adb, headset):
+def connect_problems(adb, headset, other_serials=()):
     """Turns the phone's Bluetooth on and checks that the headset connects over A2DP.
 
+    Checks first that no other phone has Bluetooth on, the headset could
+    connect to it instead. Only the device suites need that, not the UI tests.
     Uses the connect fixture: the Pixels connect on their own when Bluetooth
     turns on, the S24 when the headset reconnects to it, which works only if
     it was the last phone the headset was connected to, or else from its
     Bluetooth settings.
     """
+    on = [serial for serial in other_serials if device_state.is_bluetooth_on(AdbProxy(serial))]
+    if on:
+        return [f"Bluetooth is on on {serial}, the headset could connect to it" for serial in on]
     device_state.set_bluetooth(adb, True)
     if not is_bonded(adb, headset.address):
         return [f"not paired with {headset.name}"]
