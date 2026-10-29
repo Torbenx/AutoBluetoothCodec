@@ -64,7 +64,7 @@ lock screen is a capability:
 | Capability | Known from | Needed by | Testbed |
 | --- | --- | --- | --- |
 | Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
-| No secure lock screen | `testbed.yaml` | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
+| No secure lock screen | `secure_lock_screen: false` in `testbed.yaml`; without it a phone is assumed to have one | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
 | End the app's process like the system | `run-as … kill` on API 28 and 36; API 32 needs root, `run-as` can't see the process there | C1, C3, C4 | all |
 | LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
 
@@ -183,7 +183,7 @@ Pitfalls the harness has to handle:
   in the log. With the empty log of the baseline, the first start always logs
   one. Tests expect it instead of ignoring it.
 - The baseline links the headset, so the companion dialog only appears in tests
-  that unlink it first (E3, E6).
+  that unlink it first (J3, J6).
 
 ## 4. Test levels
 
@@ -249,7 +249,7 @@ levels and fakes that a phone can't provide.
 
 The main screen's own logic stays in `MainActivity` (D1, D13), with its own
 profile proxy. Its cases are covered on the phones: the permission states by
-V1 and E1, logging observed codecs by B3 and B11, read failures by B8.
+V1 and J1, logging observed codecs by B3 and B11, read failures by B8.
 
 ### L2 UI tests
 
@@ -323,14 +323,14 @@ check that the parts work together, not every detail on the way.
 
 | ID | Journey | Runs on | Prio |
 | --- | --- | --- | --- |
-| E1 | First start: grant the permission in the system dialog, the card shows the codec `dumpsys` reports. Denying twice shows the settings hint | 31+ | P2 |
-| E2 | Choose codecs with the chips: `dumpsys`, the card and the log agree (manual 1.1) | all | P1 |
-| E3 | Save as preferred; from 31 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
-| E4 | A codec change by another app shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2). The snippet's `setCodecDirectly` makes the change, the same call the developer options make: their screens differ too much between the phones, and the API 28 Pixel doesn't open them from their intent | all | P2 |
-| E5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone (debug builds keep it for Unlink where the device is linked) | all | P2 |
-| E6 | An unlinked device asks to be linked (on 36 because its codec is unreadable, on 34–35 once it has a preferred codec); Allow and the dialog make its codec appear and changeable | 34+ | P1 |
-| E7 | Rotating while a codec is applied: no crash, verified (manual 1.6) | all | P2 |
-| E8 | The log screen shows a real reconnect with its attempts; the anonymised export contains no addresses or names (log 2.5) | all | P2 |
+| J1 | First start: grant the permission in the system dialog, the card shows the codec `dumpsys` reports. Denying twice shows the settings hint | 31+ | P2 |
+| J2 | Choose codecs with the chips: `dumpsys`, the card and the log agree (manual 1.1) | all | P1 |
+| J3 | Save as preferred; from 31 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
+| J4 | A codec change by another app shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2). The snippet's `setCodecDirectly` makes the change, the same call the developer options make: their screens differ too much between the phones, and the API 28 Pixel doesn't open them from their intent | all | P2 |
+| J5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone (debug builds keep it for Unlink where the device is linked) | all | P2 |
+| J6 | An unlinked device asks to be linked (on 36 because its codec is unreadable, on 34–35 once it has a preferred codec); Allow and the dialog make its codec appear and changeable | 34+ | P1 |
+| J7 | Rotating while a codec is applied: no crash, verified (manual 1.6) | all | P2 |
+| J8 | The log screen shows a real reconnect with its attempts; the anonymised export contains no addresses or names (log 2.5) | all | P2 |
 
 ## 5. Where journeys are worth it
 
@@ -343,7 +343,7 @@ can show:
   and the device's codec shows on the screen. One journey per direction is
   enough to prove the wiring.
 - **The core promise from the user's view**: save, reconnect, the codec is
-  there (E3).
+  there (J3).
 
 Everything else is covered more cheaply and more thoroughly elsewhere:
 
@@ -354,7 +354,7 @@ Everything else is covered more cheaply and more thoroughly elsewhere:
 | Which chips, menus and prompts a device state shows, and which codec a chip selects | V2–V6 | Needs device states the testbed can't produce (API 34–35, no companion feature, unknown codec) |
 | Log texts for every event type | V8, V9 | Needs events that real Bluetooth rarely produces; the sample log has all of them |
 | Applying on connect in the background | C1–C9 | There must be no UI or snippet involved |
-| Anonymisation | `LogExportTest`, E8 once | Pure logic |
+| Anonymisation | `LogExportTest`, J8 once | Pure logic |
 
 ## 6. Harness
 
@@ -482,9 +482,10 @@ configuration, and the same tests run with each:
 ```yaml
 phones:
   - serial: 0000000028
+    secure_lock_screen: false
   - serial: 0000000032
+    secure_lock_screen: false
   - serial: R0000000036
-    secure_lock_screen: true
 headsets:
   qudelix:
     backend: qudelix
@@ -796,7 +797,7 @@ needs the ones before it unless it says otherwise.
    B8 pass on all three phones.
 10. **L4 P1** (done): C1, C2 and C3 pass on every phone they apply to; C3
     records what happens per API level.
-11. **L5 P1** (done): `snippet-uiautomator`, `screens.py`; E2, E3, E6 pass on
+11. **L5 P1** (done): `snippet-uiautomator`, `screens.py`; J2, J3, J6 pass on
     every phone they apply to. With this step the core promise is covered end
     to end on every phone.
 12. **P2 of all levels** (done), including C9, C13 (since removed, D20) and
@@ -811,22 +812,22 @@ needs the ones before it unless it says otherwise.
 
 | Manual test | Becomes |
 | --- | --- |
-| Codec applier 1.1 Choose a codec | B2, E2, U2 |
-| 1.2 Restore | E4 |
+| Codec applier 1.1 Choose a codec | B2, J2, U2 |
+| 1.2 Restore | J4 |
 | 1.3 Restore over several attempts | B3 |
 | 1.4 Restore twice | B5, K2 |
 | 1.5 Choose while restoring | B5, K2 |
-| 1.6 Rotate while restoring | E7 |
+| 1.6 Rotate while restoring | J7 |
 | 2.1 Reconnect with the app open | C2 |
-| 2.2 Developer options change | B11, E4 |
+| 2.2 Developer options change | B11, J4 |
 | 2.3 Bluetooth off and on | B7, K3 |
-| Not covered: linking before applying, refusal hand-back, receiver deadline, `PROFILE_UNAVAILABLE` | E6, K1, K4, B7 |
+| Not covered: linking before applying, refusal hand-back, receiver deadline, `PROFILE_UNAVAILABLE` | J6, K1, K4, B7 |
 | Not covered: the receiver or the service superseded by a choice on the main screen | B12 |
 | Not covered: toasts for failed changes | Not automated |
-| Log UI 1.1–1.6 smoke tests | V9, V11, E8 |
+| Log UI 1.1–1.6 smoke tests | V9, V11, J8 |
 | 2.1 Load the sample log | K7 |
 | 2.2–2.4 Entries | V8, V9 |
-| 2.5 Anonymised export | `LogExportTest`, E8 |
+| 2.5 Anonymised export | `LogExportTest`, J8 |
 | Not covered: clearing, live updates | V11, V10 |
 | Not covered: screen sizes, landscape, font sizes, dark mode | V12 (P3) |
 
@@ -932,11 +933,11 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   Since D18 the service counts it present while any source sees it: a
   reconnect is one appearance (C1, C2). Without A2DP, BLE is the only source,
   and its gaps remain.
-- In one run of E3 on the S24 the app set the preferred codec 13 ms after
+- In one run of J3 on the S24 the app set the preferred codec 13 ms after
   A2DP connected, while the S24 was still making the headset its active
   device. The stack reported SBC, then switched back to LDAC 96 kHz by itself
   6 ms later. The app's check 500 ms after the change still read SBC and
-  resolved `CODEC_VERIFIED`, while LDAC stayed active. The next two runs of E3
+  resolved `CODEC_VERIFIED`, while LDAC stayed active. The next two runs of J3
   and every other reconnect on the S24 applied the codec. Since D19 a codec
   counts as applied only after two matching reads.
 - Play Protect asked again for the snippet APK of a new build. The install
@@ -1003,7 +1004,7 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
 - **D8** Everything that was in question gets tested: C3 and C9 assert
   today's behaviour as the baseline for later changes (6.7).
 - **D9** Fixtures link with `cmd companiondevice associate`; the system dialog
-  only appears in E3 and E6.
+  only appears in J3 and J6.
 - **D10** The manual test records are deleted once their cases are automated.
 - **D11** The baseline codec is the phone's own choice, restored by a full
   reconnect. Tests that need another codec use SBC 44.1 kHz, 16-bit, or, where

@@ -80,16 +80,16 @@ class JourneyTest(BaselineTest):
         asserts.assert_equal("PREFERRED_SAVED", op.resolution, str(op))
         asserts.assert_equal("Preferred Codec", screen.status(), "the status chip after saving")
 
-    def test_e2_choose_a_codec_with_the_chips(self):
+    def test_j2_choose_a_codec_with_the_chips(self):
         """Choosing SBC on the card changes the codec, and the card and the log show it (manual 1.1)."""
         screen = self.main_screen()
         self.choose(screen, "SBC", SBC_44_16)
         asserts.assert_true(screen.shows("SBC", "44100 Hz", "16 bits/sample"), "the card doesn't show SBC")
 
-    def test_e3_save_as_preferred_and_reconnect(self):
+    def test_j3_save_as_preferred_and_reconnect(self):
         """Saving the codec as preferred, linking where needed; after a reconnect it's applied and shown."""
         # Since API 31 saving links the device. On API 36 an unlinked device's codec is unreadable,
-        # so there is nothing to save; E6 covers that.
+        # so there is nothing to save; J6 covers that.
         linking = 31 <= self.sdk < 36
         if linking:
             companion.unlink(self.adb, app.PACKAGE, self.address)
@@ -113,7 +113,7 @@ class JourneyTest(BaselineTest):
         asserts.assert_true(screen.shows("SBC", "44100 Hz", "16 bits/sample"), "the card doesn't show SBC")
         asserts.assert_equal("Preferred Codec", screen.status(), "the status chip after the reconnect")
 
-    def test_e6_an_unlinked_device_asks_to_be_linked(self):
+    def test_j6_an_unlinked_device_asks_to_be_linked(self):
         """Since API 34 an unlinked device asks for the link; on 36 its codec only shows once it's linked."""
         self.require(self.sdk >= 34, "a link is only needed since API 34")
         companion.unlink(self.adb, app.PACKAGE, self.address)
@@ -130,7 +130,7 @@ class JourneyTest(BaselineTest):
         asserts.assert_true(screen.shows("LDAC", "96000 Hz"), "the codec doesn't show after linking")
         self.choose(screen, "SBC", SBC_44_16)
 
-    def test_e1_first_start(self):
+    def test_j1_first_start(self):
         """First start: the permission is granted in the system's dialog, and the card shows the codec
         dumpsys reports. Denying it twice shows the settings hint."""
         self.require(self.sdk >= 31, "the permission exists since API 31")
@@ -155,7 +155,7 @@ class JourneyTest(BaselineTest):
         asserts.assert_true(screen.shows_text("Allow it in the app settings under Permissions."), "no settings hint")
         asserts.assert_true(screen.shows_text("Open settings"), "no Open settings button")
 
-    def test_e4_an_external_change_shows_and_the_preferred_codec_is_restored(self):
+    def test_j4_an_external_change_shows_and_the_preferred_codec_is_restored(self):
         """A codec set by another app shows on the card within 2 s; Restore Preferred Codec brings the
         preferred codec back (manual 1.2, 2.2). The snippet sets it the way the developer options do."""
         own = bt_oracle.active_codec(self.adb, self.address)
@@ -168,7 +168,7 @@ class JourneyTest(BaselineTest):
             changed = time.time()
             bt_oracle.wait_for(self.adb, lambda s: same_format(SBC_44_16, s.device(self.address).codec), 10, what="SBC")
             asserts.assert_true(screen.shows(*SBC_TEXTS), "the card doesn't show SBC")
-            self.ad.log.info("E4: the card showed SBC %.1f s after the change", time.time() - changed)
+            self.ad.log.info("J4: the card showed SBC %.1f s after the change", time.time() - changed)
             asserts.assert_true(time.time() - changed <= 2.0 + 1.5, "the card took longer than 2 s, plus the reads")
             asserts.assert_equal("Save As Preferred Codec", screen.status(), "the status chip after the change")
             mark = self.log.last_seq()
@@ -181,7 +181,7 @@ class JourneyTest(BaselineTest):
         finally:
             self.ad.unload_snippet(SNIPPET)
 
-    def test_e5_delete_the_preferred_codec(self):
+    def test_j5_delete_the_preferred_codec(self):
         """After deleting the preferred codec, a reconnect leaves the codec alone and the menu has no
         preferred codec items."""
         screen = self.main_screen()
@@ -203,7 +203,7 @@ class JourneyTest(BaselineTest):
         set_codec = [e for e in self.log.events_after(mark) if e["type"] == "SET_CODEC_CONFIG"]
         asserts.assert_equal([], set_codec, "a codec was set after the reconnect")
 
-    def test_e7_rotate_while_applying(self):
+    def test_j7_rotate_while_applying(self):
         """Rotating while a codec is applied: no crash, the codec is verified (manual 1.6)."""
         saved = {key: device_state.get_setting(self.adb, "system", key) for key in ("accelerometer_rotation", "user_rotation")}
         device_state.put_setting(self.adb, "system", "accelerometer_rotation", "0")
@@ -216,7 +216,7 @@ class JourneyTest(BaselineTest):
             screen.tap_chip("SBC")
             device_state.put_setting(self.adb, "system", "user_rotation", "1")
             op = self.log.wait_for_operation(after=mark, trigger="USER_SET_CODEC", device=self.address, timeout=30)
-            self.ad.log.info("E7: %s", op)
+            self.ad.log.info("J7: %s", op)
             asserts.assert_equal("CODEC_VERIFIED", op.resolution, str(op))
             asserts.assert_true(same_format(SBC_44_16, bt_oracle.active_codec(self.adb, self.address)), "SBC isn't active")
             screen.wait_for_card()
@@ -225,7 +225,7 @@ class JourneyTest(BaselineTest):
             for key, value in saved.items():
                 device_state.put_setting(self.adb, "system", key, value)
 
-    def test_e8_the_log_shows_a_reconnect_and_exports_it_anonymised(self):
+    def test_j8_the_log_shows_a_reconnect_and_exports_it_anonymised(self):
         """The log screen shows a real reconnect with its attempts; the anonymised export contains no
         addresses or names (log 2.5)."""
         screen = self.main_screen()

@@ -57,8 +57,9 @@ class DeviceTest(base_test.BaseTestClass):
         self.adb = self.ad.adb
         self.log = app_log.AppLog(self.adb)
         self.sdk = app.sdk(self.adb)
-        # Declared per phone in testbed.yaml, see TestConcept.md section 2
-        self.secure_lock_screen = bool(getattr(self.ad, "secure_lock_screen", False))
+        # Declared per phone in testbed.yaml, see TestConcept.md section 2. Without it a phone is
+        # assumed to have one, so a test that can't work with one isn't run by mistake
+        self.secure_lock_screen = bool(getattr(self.ad, "secure_lock_screen", True))
         self.ad.log.info("API %d, headset %s (%s)", self.sdk, self.headset.name, self.headset.backend)
 
     def setup_test(self):

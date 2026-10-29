@@ -7,10 +7,11 @@
 
 phones:
   # The serial as adb devices lists it
-  - serial: 0123456789AB    # A phone without a secure lock screen
+  # A phone is assumed to have a secure lock screen: after a reboot the app can't
+  # run until the phone is unlocked
   - serial: R0000000000     # A phone with one
-    # After a reboot the app can't run until the phone is unlocked
-    secure_lock_screen: true
+  - serial: 0123456789AB    # A phone without one
+    secure_lock_screen: false
 
 headsets:
   # The key is the name to pick it with run_suite.py --headset
