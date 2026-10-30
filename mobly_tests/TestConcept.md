@@ -636,7 +636,13 @@ Prepared once per phone, outside the suite: developer options and USB
 debugging on, the headsets paired with the phone; the connect fixture
 connects them (6.6). On phones with Google Play Protect, its option to send
 unknown apps to Google for a scan is off: otherwise installing a new build
-waits on its dialog until the install times out. It's off on the S24. Saving and restoring a phone's own app data,
+waits on its dialog until the install times out. It's off on the S24. On
+Samsung phones "USB-Verbindungen blockieren, wenn gesperrt" (Sicherheit und
+Datenschutz > Weitere Sicherheitseinstellungen, the secure setting
+`block_usb_lock`) is off: otherwise adb stays blocked after a reboot until
+the phone is unlocked, and the locked reboot tests can't see the phone before
+the unlock. It's on by default, and `settings put` refuses the key, so it's
+turned off by hand. Saving and restoring a phone's own app data,
 like the S24's, is outside the suite too (D7).
 
 1. Start `testbed_session.py` in one terminal.
@@ -655,6 +661,7 @@ instead of failing every test:
 
 - The phone is on adb, plugged in, its screen on and unlocked, and
   `stay_on_while_plugged_in` includes USB.
+- `block_usb_lock` isn't 1, so adb is up after a reboot before the unlock.
 - Before the device suites, not the L2 tests: no other phone on adb has
   Bluetooth on.
 - The headset is paired with the phone.

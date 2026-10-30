@@ -37,6 +37,10 @@ UNLOCK_APPEARANCE_TIMEOUT = 60.0
 class RebootTest(ColdStartBase):
     def setup_class(self):
         super().setup_class()
+        # Samsung only, adb can't change it: settings put refuses the key
+        if device_state.get_setting(self.adb, "secure", "block_usb_lock") == "1":
+            asserts.abort_class("block_usb_lock is 1, adb would stay blocked after a reboot until a manual the unlock")
+
         if self.lock_class == lock_screen.PURE_TEST_DEVICE and lock_screen.has_credential(self.adb):
             # Left by a run that ended before its teardown. The suite only ever sets 0000, so clearing it is tried once
             self.ad.log.warning("the pure test device has a credential, clearing the PIN 0000")
