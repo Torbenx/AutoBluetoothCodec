@@ -2,6 +2,7 @@ package com.tt.autobluetoothcodec
 
 import android.bluetooth.BluetoothDevice
 import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.core.content.edit
@@ -24,6 +25,8 @@ object PreferredCodecStore {
         ignoreUnknownKeys = true
     }
 
+    private var dpsPreferences: SharedPreferences? = null
+
     fun get(context: Context, device: BluetoothDevice): CodecConfig? {
         val text = preferences(context).getString(key(device), null) ?: return null
         return try {
@@ -45,11 +48,18 @@ object PreferredCodecStore {
     /** Removes the preferred codecs of all devices, for tests. */
     @VisibleForTesting
     fun clearForTest(context: Context) {
+        // Each test has its own context and files
+        dpsPreferences = null
         preferences(context).edit(commit = true) { clear() }
     }
 
-    private fun preferences(context: Context) =
-        context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private fun preferences(context: Context): SharedPreferences {
+        return dpsPreferences ?:
+            context.applicationContext
+                .createDeviceProtectedStorageContext()
+                .getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .also { dpsPreferences = it }
+    }
 
     private fun key(device: BluetoothDevice) = device.address.uppercase()
 }

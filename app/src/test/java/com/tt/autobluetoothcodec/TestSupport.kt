@@ -5,6 +5,7 @@ import android.app.Application
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.os.Looper
+import android.os.UserManager
 import androidx.test.core.app.ApplicationProvider
 import org.robolectric.Shadows.shadowOf
 import java.time.Duration
@@ -25,11 +26,16 @@ object TestSupport {
 
     fun denyPermission() = shadowOf(context).denyPermissions(Manifest.permission.BLUETOOTH_CONNECT)
 
+    /** Locks or unlocks the user's credential protected storage, as before and after the first unlock after a reboot. */
+    fun setUserUnlocked(unlocked: Boolean) =
+        shadowOf(context.getSystemService(UserManager::class.java)).setUserUnlocked(unlocked)
+
     /** Resets the process-wide state and returns an applier that uses [a2dp]. */
     fun resetApp(a2dp: FakeA2dp): CodecApplier {
         // Robolectric's uptime starts at 100 ms, but the applier takes a request's first attempt at
         // 0 to be 500 ms in the past, like it is on a phone that has been running for a while
         runFor(60_000)
+        setUserUnlocked(true)
         EventLog.resetForTest(context)
         CodecApplier.resetForTest(context, a2dp)
         PreferredCodecStore.clearForTest(context)

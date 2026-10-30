@@ -7,8 +7,12 @@
     <!-- The event log is diagnostic data of this phone, see EventLog -->
     <cloud-backup>
         <exclude domain="file" path="logs" />
+        <!-- Where it's written before the user unlocks the phone after a reboot -->
+        <exclude domain="device_file" path="logs" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="logs" />
+        <!-- Where it's written before the user unlocks the phone after a reboot -->
+        <exclude domain="device_file" path="logs" />
     </device-transfer>
 </data-extraction-rules>

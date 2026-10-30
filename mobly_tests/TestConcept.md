@@ -264,6 +264,7 @@ levels and fakes that a phone can't provide.
 | K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
 | K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines; disabling deletes the log, stays disabled after a restart and keeps operations that span it out of the log | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
+| K9 | Direct boot: while the user is locked the log appends to its device protected file and can't be read; unlocking merges those events after the old ones, numbered on, also when reading notices the unlock, also across locked restarts; operations left open by an earlier process are interrupted, those of this process continue; trimming and partial lines; disabled logging and the preferred codecs are known while locked | P1 |
 
 The main screen's own logic stays in `MainActivity` (D1, D13), with its own
 profile proxy. Its cases are covered on the phones: the permission states by
@@ -834,7 +835,7 @@ needs the ones before it unless it says otherwise.
    assert texts and tags, not layout, the polish changes few of them.
 3. **JVM setup and L0**: Robolectric, the shared source directory,
    `robolectric.properties`; U1–U7; the example tests go.
-4. **L1 P1**: K1, K2, K4, K5, K6, K7.
+4. **L1 P1**: K1, K2, K4, K5, K6, K7, K9.
 5. **L2 P1 on the JVM**: V2–V6, V8, V9. With this step everything that runs
    without a phone has its P1 tests.
 6. **Harness core**, testable without phones first: the `bt_oracle` and

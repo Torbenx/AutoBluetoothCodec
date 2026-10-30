@@ -6,4 +6,6 @@
 <full-backup-content>
     <!-- The event log is diagnostic data of this phone, see EventLog -->
     <exclude domain="file" path="logs" />
+    <!-- Where it's written before the user unlocks the phone after a reboot -->
+    <exclude domain="device_file" path="logs" />
 </full-backup-content>
