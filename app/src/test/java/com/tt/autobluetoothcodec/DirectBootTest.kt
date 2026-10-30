@@ -83,7 +83,6 @@ class DirectBootTest {
         restartLocked()
         log.log(EventType.TEST_LABEL, message = "a")
         assertThrows(IllegalStateException::class.java) { log.events }
-        assertThrows(IllegalStateException::class.java) { log.lastKnownCodec(ADDRESS) }
         assertThrows(IllegalStateException::class.java) { log.clear() }
         // Clearing didn't drop the locked event
         setUserUnlocked(true)
@@ -131,7 +130,7 @@ class DirectBootTest {
         restartLocked()
         log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice(ADDRESS), actual = LogCodecConfig.of(sbc()))
         setUserUnlocked(true)
-        assertEquals(sbc().toAndroid(), log.lastKnownCodec(ADDRESS))
+        assertEquals(sbc().toAndroid(), log.events.value.single().actual!!.android)
         flushLog()
         assertFalse(dpsFile.exists())
         assertEquals(1, lines(upsFile).size)

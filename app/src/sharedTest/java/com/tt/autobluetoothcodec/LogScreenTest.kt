@@ -136,7 +136,7 @@ class LogScreenTest {
         for (text in listOf(
             "Device connected",
             "Device disconnected",
-            "App observed an external codec change: $sbcText",
+            "App read the codec: $sbcText",
             "Couldn't read the codec",
             "java.lang.SecurityException: refused",
             "Preferred codec deleted",

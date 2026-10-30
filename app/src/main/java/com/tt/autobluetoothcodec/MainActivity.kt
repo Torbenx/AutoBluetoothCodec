@@ -488,8 +488,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     }
 
     /**
-     * Logs codecs that differ from the last one known for the device, and new read errors. While
-     * the applier changes the codec of a device, its operation logs the codecs instead.
+     * Logs codecs that differ from the last one known for the device in this process, so the first
+     * one read in a process as well, and new read errors. While the applier changes the codec of a
+     * device, its operation logs the codecs instead.
      */
     private fun logObservedCodec(data: DeviceData) {
         val address = data.device.address.uppercase()
@@ -501,8 +502,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
         readFailures.remove(address)
         val config = data.androidCodecConfig ?: return
-        if (address !in applier.pending.value && config != log.lastKnownCodec(address))
+        if (address !in applier.pending.value && config != applier.knownCodec(address)) {
+            applier.noteObservedCodec(address, config)
             log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
+        }
     }
 
     private fun readDeviceData(profile: BluetoothA2dp, device: BluetoothDevice): DeviceData {

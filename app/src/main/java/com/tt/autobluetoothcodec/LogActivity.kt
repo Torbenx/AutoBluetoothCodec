@@ -309,7 +309,7 @@ private fun describe(event: LogEvent): String {
         EventType.ERROR -> "Failed"
         EventType.OPERATION_INTERRUPTED -> "Interrupted, app was stopped"
         EventType.DEVICE_DISAPPEARED -> "Device disconnected"
-        EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE -> "App observed an external codec change: $actual"
+        EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE -> "App read the codec: $actual"
         EventType.READ_FAILED -> "Couldn't read the codec"
         EventType.PREFERRED_DELETED -> "Preferred codec deleted"
         EventType.DEVICE_UNLINKED -> "Device unlinked"

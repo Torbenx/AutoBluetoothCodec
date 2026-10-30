@@ -26,6 +26,9 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * The profile proxy is opened by the first request and kept until Bluetooth turns off, keeping it
  * open only holds a binder reference. The applier reaches the profile through [A2dpAccess].
+ *
+ * It also keeps the codec last known for each device during this process, see [knownCodec], so the
+ * main screen can tell changes made outside the app from the applier's own.
  */
 class CodecApplier @VisibleForTesting internal constructor(
     private val context: Context,
@@ -67,6 +70,20 @@ class CodecApplier @VisibleForTesting internal constructor(
     private val mutablePending = MutableStateFlow<Map<String, CodecConfig>>(emptyMap())
     /** The target of each device with a pending request, by upper case address. */
     val pending: StateFlow<Map<String, CodecConfig>> = mutablePending.asStateFlow()
+
+    // By upper case address
+    private val knownCodecs = HashMap<String, AndroidCodecConfig>()
+
+    /**
+     * Returns the codec most recently read from the device during this process, by the applier or
+     * reported by [noteObservedCodec], or null if there was none.
+     */
+    fun knownCodec(address: String): AndroidCodecConfig? = knownCodecs[address.uppercase()]
+
+    /** Records [codec] as read from the device with [address] outside the applier. */
+    fun noteObservedCodec(address: String, codec: AndroidCodecConfig) {
+        knownCodecs[address.uppercase()] = codec
+    }
 
     /**
      * Applies [target] to [device], or its preferred codec if [target] is null. The request is
@@ -154,7 +171,8 @@ class CodecApplier @VisibleForTesting internal constructor(
         message: String? = null
     ) {
         requests.remove(request)
-        // Resolved first, observers of pending compare the codec with the last one logged
+        // Resolved first, so observers of pending see the operation ended. They compare the codec with
+        // knownCodec, which the request's last read updated already
         request.operation.resolve(resolution, config = config, actual = actual, attempt = attempt, message = message)
         publishPending()
         request.onDone?.invoke(resolution)
@@ -247,7 +265,9 @@ class CodecApplier @VisibleForTesting internal constructor(
 
         var actual: LogCodecConfig? = null
         if (request.attemptCount > 0) {
-            actual = a2dp.getCodec(request.device)?.let { LogCodecConfig.of(it) }
+            val read = a2dp.getCodec(request.device)
+            read?.let { knownCodecs[request.device.address.uppercase()] = it }
+            actual = read?.let { LogCodecConfig.of(it) }
             operation.log(EventType.VALIDATE_CODEC_CONFIG, config = target, actual = actual, attempt = request.attemptCount)
             if (actual?.own?.let { request.target.isFulfilledBy(it) } == true) {
                 request.matchingReads += 1

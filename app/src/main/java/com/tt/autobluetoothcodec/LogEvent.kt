@@ -52,9 +52,9 @@ enum class EventType(val flow: OperationFlow) {
 
     DEVICE_APPEARED(OperationFlow.STANDALONE),
     DEVICE_DISAPPEARED(OperationFlow.STANDALONE),
-    // MainActivity read a codec that differs from the last one known for the device, while the app
-    // wasn't changing it. When the codec changed isn't known, only that it changed since the last
-    // known one was logged
+    // MainActivity read a codec that differs from the last one known for the device in this process,
+    // while the app wasn't changing it. The first codec read in a process is logged as well, so it
+    // may not have changed at all. When it changed isn't known
     ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE(OperationFlow.STANDALONE),
     READ_FAILED(OperationFlow.STANDALONE),
     PREFERRED_DELETED(OperationFlow.STANDALONE),

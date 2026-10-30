@@ -198,8 +198,9 @@ Pitfalls the harness has to handle:
   that was set before.
 - Opening the main screen logs the current codec as
   `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE` when it differs from the last one
-  in the log. With the empty log of the baseline, the first start always logs
-  one. Tests expect it instead of ignoring it.
+  `CodecApplier` knows for the device. That knowledge only lasts for the
+  process, so the first start in a new process always logs one, and the
+  baseline starts a new process. Tests expect it instead of ignoring it.
 - The baseline links the headset, so the companion dialog only appears in tests
   that unlink it first (J3, J6).
 
@@ -240,7 +241,7 @@ Pure JVM. Three test files exist; `ExampleUnitTest` and
 | U3 | `equals`/`hashCode` through `toAndroid`, clones are independent (the chips modify clones) | P2 |
 | U4 | `describe()`: LDAC fixed bitrates per sample rate family, unknown rate and size, AAC and Opus options | P2 |
 | U5 | Serializers: unknown Hz and bits read as NONE, constant names, numeric fallback, unknown names throw | P2 |
-| U6 | `EventLog` functions: `trim` at the boundary, interleaved operations, `lastKnownCodec` | P2 |
+| U6 | `EventLog` functions: `trim` at the boundary, interleaved operations | P2 |
 | U7 | `LogExport`: names containing other names, lower case addresses in messages | P3 |
 
 Codec selection and the log texts stay in the activity files (D1), so they're
@@ -257,7 +258,7 @@ levels and fakes that a phone can't provide.
 | ID | Test | Prio |
 | --- | --- | --- |
 | K1 | `CodecApplier` resolutions: `CODEC_VERIFIED` on attempt 1 and N after two matching reads, a codec changed back after the first matching read set again (D19), `MAX_ATTEMPTS` after 5, `NOT_CONNECTED`, `NO_ASSOCIATION` (34, 36), `NO_PERMISSION` (31+), `NO_PREFERRED_CODEC`, `PROFILE_UNAVAILABLE` (Bluetooth off, no proxy), `PROFILE_DISCONNECTED`, `SECURITY_EXCEPTION`, hand-back to `onSecurityException`, `ERROR` | P1 |
-| K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request | P1 |
+| K2 | `CodecApplier` coordination: `ALREADY_PENDING`, `SUPERSEDED` with `pending` never showing the device idle in between (regression test for manual 1.5), cancel by device and by operation, two devices with their own timing, `onDone` exactly once per request, `knownCodec` is the last read (or observed codec) by the time the request ends | P1 |
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
 | K5 | `CodecCompanionService`: no preferred codec registers no receiver; appearing registers the receiver once and applies nothing, even with A2DP connected (D23); A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |

@@ -142,7 +142,7 @@ class BtLogicTest(SnippetTest):
         ldac = next((c for c in self.capabilities() if c.codec_type == bt_oracle.LDAC), None)
         self.require(ldac and ldac.supports(0x8, 0x4) and ldac.supports(0x1, 0x2), "LDAC 96/32 and 44.1/24 aren't offered")
         app.launch(self.adb)
-        # The first start logs the current codec, the log is empty
+        # The first start in a new process logs the current codec
         self.log.wait_for_event("ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE", timeout=10)
         self.snippet.setCodecDirectly(self.address, LDAC_96_32_ADAPTIVE.to_app())
         bt_oracle.wait_for(self.adb, lambda s: same_format(LDAC_96_32_ADAPTIVE, s.device(self.address).codec), 10,
@@ -300,7 +300,7 @@ class BtLogicTest(SnippetTest):
         """A codec set bypassing the applier, with the main screen open, is logged once as an external
         change; the app's own changes never are (manual 2.2)."""
         app.launch(self.adb)
-        # The first start logs the current codec, the log is empty
+        # The first start in a new process logs the current codec
         self.log.wait_for_event("ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE", timeout=10)
         time.sleep(2)
         external = self.other_codec()

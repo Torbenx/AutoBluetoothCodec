@@ -294,6 +294,43 @@ class CodecApplierTest {
     }
 
     @Test
+    fun theKnownCodecIsTheLastReadWhenTheRequestEnds() {
+        assertNull(applier.knownCodec(ADDRESS))
+        var knownWhenDone: AndroidCodecConfig? = null
+        applier.apply(device(), begin(), sbc(), onDone = { knownWhenDone = applier.knownCodec(ADDRESS) })
+        runFor(VERIFY_MILLIS)
+        // The main screen compares the codec with it once the device leaves pending
+        assertEquals(sbc().toAndroid(), knownWhenDone)
+        assertEquals(sbc().toAndroid(), applier.knownCodec(ADDRESS.lowercase()))
+        assertNull(applier.knownCodec(OTHER_ADDRESS))
+    }
+
+    @Test
+    fun theKnownCodecOfAFailedRequestIsItsLastRead() {
+        a2dp.codecs[ADDRESS] = ldac().toAndroid()
+        a2dp.onSet = { _, _ -> }
+        val (_, done) = apply(sbc())
+        runFor(4000)
+        assertEquals(EventType.MAX_ATTEMPTS, done.only)
+        assertEquals(ldac().toAndroid(), applier.knownCodec(ADDRESS))
+    }
+
+    @Test
+    fun anObservedCodecIsKnownUntilTheNextRead() {
+        applier.noteObservedCodec(ADDRESS.lowercase(), ldac().toAndroid())
+        assertEquals(ldac().toAndroid(), applier.knownCodec(ADDRESS))
+        // A read without a codec status keeps it
+        a2dp.onSet = { _, _ -> }
+        val (operation, _) = apply(sbc())
+        runFor(600)
+        assertTrue(EventType.VALIDATE_CODEC_CONFIG in types(operation))
+        assertEquals(ldac().toAndroid(), applier.knownCodec(ADDRESS))
+        a2dp.codecs[ADDRESS] = sbc().toAndroid()
+        runFor(VERIFY_MILLIS)
+        assertEquals(sbc().toAndroid(), applier.knownCodec(ADDRESS))
+    }
+
+    @Test
     fun theProfileIsRequestedOnceAndKept() {
         a2dp.connectsAutomatically = false
         val (_, first) = apply(sbc())

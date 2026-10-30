@@ -276,14 +276,6 @@ class EventLog private constructor(context: Context) {
         append(type = type, device = device, config = config, actual = actual, message = message)
     }
 
-    /** Returns the codec most recently read from the device, according to the log. */
-    fun lastKnownCodec(address: String): AndroidCodecConfig? {
-        checkEventAccess()
-        return mutableEvents.value.lastOrNull {
-            it.actual != null && it.device?.address.equals(address, ignoreCase = true)
-        }?.actual?.android
-    }
-
     /** Removes all events, except those of open operations. */
     fun clear() {
         checkEventAccess()

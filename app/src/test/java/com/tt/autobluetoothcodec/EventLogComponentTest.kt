@@ -3,15 +3,11 @@ package com.tt.autobluetoothcodec
 import android.content.pm.ApplicationInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tt.autobluetoothcodec.TestSupport.ADDRESS
-import com.tt.autobluetoothcodec.TestSupport.OTHER_ADDRESS
 import com.tt.autobluetoothcodec.TestSupport.context
 import com.tt.autobluetoothcodec.TestSupport.flushLog
-import com.tt.autobluetoothcodec.TestSupport.ldac
-import com.tt.autobluetoothcodec.TestSupport.sbc
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -181,16 +177,5 @@ class EventLogComponentTest {
         }
         read.await()
         assertEquals(10, seen)
-    }
-
-    @Test
-    fun lastKnownCodecIsTheMostRecentReadOfTheDevice() {
-        assertNull(log.lastKnownCodec(ADDRESS))
-        log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice(ADDRESS), actual = LogCodecConfig.of(sbc()))
-        log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice(OTHER_ADDRESS), actual = LogCodecConfig.of(ldac()))
-        assertEquals(sbc().toAndroid(), log.lastKnownCodec(ADDRESS.lowercase()))
-        val operation = log.begin(EventType.USER_SET_CODEC, LogDevice(ADDRESS))
-        operation.resolve(EventType.CODEC_VERIFIED, actual = LogCodecConfig.of(ldac()))
-        assertEquals(ldac().toAndroid(), log.lastKnownCodec(ADDRESS))
     }
 }
