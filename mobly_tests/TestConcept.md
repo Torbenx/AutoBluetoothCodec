@@ -2,7 +2,7 @@
 
 How Auto Bluetooth Codec is tested: which test levels exist, what each one
 covers, which information and control channels they use, what the harness
-needs, and in which order it's built. The decisions behind it, D1 to D19, are
+needs, and in which order it's built. The decisions behind it, D1 to D26, are
 listed in [section 13](#13-decisions) and referenced where they matter.
 
 Two manual test records, `tools/codec-applier-tests.md` and
@@ -31,9 +31,9 @@ between the app and the system, which unit tests can't see.
 
 | Phone | Serial | Android | API | Notes |
 | --- | --- | --- | --- | --- |
-| Pixel 3a | `0000000028` | 9 | 28 | Rooted, no lock screen, clock set to 2019 |
-| Pixel 3a | `0000000032` | 12L | **32** | Rooted, no lock screen |
-| Galaxy S24 | `R0000000036` | 16 | 36 | Not rooted, secure lock screen, Samsung Bluetooth stack |
+| Pixel 3a | `0000000028` | 9 | 28 | Rooted, pure test device, clock set to 2019 |
+| Pixel 3a | `0000000032` | 12L | **32** | Rooted, pure test device |
+| Galaxy S24 | `R0000000036` | 16 | 36 | Not rooted, personal phone with a known PIN, Samsung Bluetooth stack |
 
 | Headset | Address | Controlled by |
 | --- | --- | --- |
@@ -52,19 +52,37 @@ Assumptions:
   testing: it keeps Bluetooth off on every phone on adb, keeps the screens on
   while plugged in, and warns when a phone is locked, unplugged or unreachable.
   Tests turn Bluetooth on for the phone under test and off again.
-- The phones are unlocked during a run, the S24 included (D15).
+- The phones are unlocked during a run, the S24 included (D15). Only the
+  reboot tests lock them, and unlock them again (D24).
+
+### Lock screen classes
+
+Each phone in `testbed.yaml` is in one of three classes (D24). They decide
+which phones may be rebooted, since a reboot ends at the lock screen.
+
+| Class | `testbed.yaml` | Lock screen | Reboot tests |
+| --- | --- | --- | --- |
+| Pure test device | `pure_test_device: true` | None by default. C14 and C15 set the PIN 0000 and clear it again | C7, C14, C15 |
+| Personal phone | `lock_password: "…"`, quoted | Its own; the password is only typed, never set or cleared | C14, C15 |
+| Unknown password | neither | Its own | none |
+
+The suite only ever sets or clears the PIN 0000, with two hardcoded commands
+in [lock_screen.py](mobly_tests/lib/lock_screen.py); a harness self-test
+fails if any other command sets or clears a credential. A personal phone's
+password never reaches the results (D25).
 
 ### Phone capabilities
 
 Tests don't name phones (D7). They name the API levels they apply to and the
 capabilities they need. On a phone without one the test is not applicable,
-with the reason in the report. Only what genuinely can't work without root or with a secure
-lock screen is a capability:
+with the reason in the report. Only what genuinely can't work without root or
+with the phone's lock screen is a capability:
 
 | Capability | Known from | Needed by | Testbed |
 | --- | --- | --- | --- |
 | Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
-| No secure lock screen | `secure_lock_screen: false` in `testbed.yaml`; without it a phone is assumed to have one | C7: after a reboot, the app can't run until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
+| No lock screen | A pure test device | C7: with a secure lock screen the app can't run after a reboot until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
+| A lock screen the suite can unlock | A pure test device or a known password | C14, C15: the phone is rebooted with a secure lock screen and unlocked by typing its PIN or password | all |
 | End the app's process like the system | `run-as … kill` on API 28 and 36; API 32 needs root, `run-as` can't see the process there | C1, C3, C4 | all |
 | LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
 
@@ -309,12 +327,38 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
 | C5 | Permission revoked, the device connects: its appearance is logged, nothing is applied, anything that tries resolves `NO_PERMISSION`, no crash (D23) | 31+ | | P2 |
 | C6 | No preferred codec: the codec isn't touched and nothing is logged; the manifest receiver starts the process and returns | all | | P2 |
-| C7 | After a reboot, without opening the app: applied | all | no secure lock screen | P2 |
+| C7 | After a reboot, without opening the app: applied | all | no lock screen | P2 |
 | C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
 | C9 | Never launched (fresh install) and force-stopped, then the device connects: records what happens. Characterization (D8) | all | | P2 |
 | C10 | The phone's Bluetooth turned off and on while the app is dead, then the device connects: applied | all | | P3 |
 | C11 | 20 reconnects in a row: every one verified, time to verified recorded | all | | P3 |
 | C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
+| C14 | After a reboot with a secure lock screen, A2DP connects before the first unlock: applied within 60 s of the unlock, without another connect; the time is recorded. Fails today | all | a lock screen the suite can unlock | P1 |
+| C15 | After the same reboot, the system reports the device to the companion service: after the unlock, and when it next connects. Fails today on API 31–33 | 31+ | a lock screen the suite can unlock | P1 |
+
+C7, C14 and C15 are in `tests/reboot_test.py`, which runs last (6.9). C14
+and C15 check that the scenario happened: the user is still `RUNNING_LOCKED`
+(`am get-started-user-state`) when A2DP has connected. If A2DP doesn't
+connect before the unlock, they reconnect the headset once; the connect
+fixture's last resort, the Bluetooth settings, is behind the lock screen.
+
+Before the first unlock the app's storage is encrypted, and its receiver and
+companion service, which can't run before the unlock, aren't started. From
+the AOSP sources, per API level:
+
+| API | Before the unlock | At the unlock | C14 | C15 |
+| --- | --- | --- | --- | --- |
+| 28–30 | Receiver skipped | Nothing | fails | – |
+| 31–32 | Receiver skipped; the companion device manager caches a no-op for the service | Nothing; the service can't be bound until the next reboot | fails | fails |
+| 33 | Receiver skipped; the manager's service cache is built without the app | Nothing; the device already counts as present | fails | fails, until some package changes |
+| 34 | Receiver skipped; Bluetooth connects held back, BLE sightings not | Without a BLE sighting: the service is bound, too late to apply. With one: like 33 | fails | passes or fails |
+| 35–36 | Receiver skipped; all presence events held back | Replayed: the service is bound, too late to apply | fails | passes |
+
+The fix C14 waits for is a `BOOT_COMPLETED` receiver: the broadcast is sent
+after the first unlock. It doesn't repair the companion device manager on
+31–33, so C15 keeps failing there. Unless the app is made to run before the
+unlock, which avoids the broken lookups, C15 becomes a characterization test
+(D8) once the fix is decided.
 
 ### L5 Journeys
 
@@ -366,6 +410,7 @@ mobly_tests/
   run_suite.py            runs the suites one phone at a time, for one headset
   lib/
     device_state.py       exists: Bluetooth, screen, lock state
+    lock_screen.py        lock screen classes, the PIN 0000, unlocking like a user
     baseline.py           checks and restores the baseline state
     headset.py            the Headset controller and its backends
     app.py                install, verify the build, reset, launch, kill, permissions
@@ -376,6 +421,7 @@ mobly_tests/
   tests/
     bt_logic_test.py      L3
     cold_start_test.py    L4
+    reboot_test.py        L4 tests that reboot the phone
     journey_test.py       L5
     harness_test.py       self-tests against testdata/
   testdata/               recorded dumpsys output and logs
@@ -482,10 +528,11 @@ configuration, and the same tests run with each:
 ```yaml
 phones:
   - serial: 0000000028
-    secure_lock_screen: false
+    pure_test_device: true
   - serial: 0000000032
-    secure_lock_screen: false
+    pure_test_device: true
   - serial: R0000000036
+    lock_password: "…"
 headsets:
   qudelix:
     backend: qudelix
@@ -595,8 +642,9 @@ like the S24's, is outside the suite too (D7).
 1. Start `testbed_session.py` in one terminal.
 2. `run_suite.py --headset qudelix` runs, on each phone on adb, one after the
    other: the sanity checks, Bluetooth on, the L2 tests (section 7), the
-   journeys, then L3 and L4, Bluetooth off. The journeys need the screen on,
-   so they run before the tests that turn it off or reboot.
+   journeys, then L3 and L4 with the reboot tests last, Bluetooth off. The
+   journeys need the screen on, so they run before the tests that turn it
+   off or reboot.
 3. Every phone runs every test its API level and capabilities allow. A suite
    passes when no test failed or was aborted; the tests that are not
    applicable are listed with their reasons (D22).
@@ -805,7 +853,9 @@ needs the ones before it unless it says otherwise.
     `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is not applicable for its API level or
     headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
-13. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
+13. **Locked reboot**: the lock screen classes (D24–D26), C14 and C15, which
+    fail until the app applies the preferred codec after the first unlock.
+14. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
     test once R8 is enabled.
 
 ## 11. Existing manual tests
@@ -982,6 +1032,17 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   after the fixture's grant, and the manifest receiver was refused A2DP
   connecting for the missing permission. C7 now waits until the grant is
   written, by reading the file with root, or 15 s without.
+- The first run of the reboot tests on both Pixels: with the PIN 0000 set,
+  Mobly's `reboot()` returns at the lock screen, so `sys.boot_completed` is
+  set before the unlock, and the user is `RUNNING_LOCKED` until it. A2DP
+  connected before the unlock on its own, with the phone's own codec. C14
+  failed on both: within 60 s of the unlock nothing applied the preferred
+  codec and the app logged nothing. C15 failed on API 32: no appearance
+  after the unlock, and none when the headset was off for 15 s and on again,
+  although the companion device manager logged `onDeviceConnected`; only the
+  manifest receiver applied the codec. C7 passed after each clean reboot,
+  and no test left the baseline broken. On Android 9 the Gatekeeper SID in
+  `dumpsys lock_settings` tells whether the PIN is set.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
@@ -1064,3 +1125,28 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   appearance events, C3 and C5 wait for one instead of an operation. Without
   the permission no receiver gets A2DP connecting, so C5 no longer sees
   `NO_PERMISSION`, only the appearance.
+- **D24** Every phone is in one of three lock screen classes in
+  `testbed.yaml`: a pure test device (`pure_test_device: true`), which has
+  no lock screen by default, a personal phone with a known password
+  (`lock_password`), and a phone whose password isn't known, which is never
+  rebooted. The suite only ever sets or clears the PIN 0000, and only on a
+  pure test device, with two hardcoded commands. Unlocking is tried once:
+  a wrong password counts as a failed attempt, which brings lockout delays
+  and, on some phones, a factory reset. If it fails, the run is aborted. A
+  PIN a run left behind on a pure test device is cleared once when the
+  reboot tests start.
+- **D25** A personal phone's password stays out of the results. Mobly
+  records an AndroidDevice's config in every test summary, so
+  `run_suite.py` passes only the lock screen class and the path of
+  `testbed.yaml`; the password is read from it when it's typed, with a
+  plain adb call, since Mobly's AdbProxy logs every command.
+- **D26** A test that rebooted with a secure lock screen ends with a clean
+  reboot: Bluetooth off, the PIN cleared on a pure test device, reboot,
+  unlock, Bluetooth on. On API 31–33, and on 34 after a BLE sighting, the
+  companion device manager doesn't find the service for the rest of a boot
+  in which the device appeared before the unlock, which would break C3 and
+  C5 in this run and the next. With Bluetooth off, nothing appears before
+  the unlock. The test images turn the swipe lock screen off at every boot,
+  so the suite needs no command for that. Their `locksettings set-disabled`
+  at boot counts as a failed attempt on Android 9 and 12L while the PIN is
+  set; the unlock right after resets the count.

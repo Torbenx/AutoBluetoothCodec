@@ -16,6 +16,7 @@
    * Setup testing using Mobly (Done)
    * Add open source licences somewhere (Done)
    * There is potential issue with applying the codec after a restart when A2DP connects before the first unlock and the app nevers sees the broadcast.
+     C14 and C15 in mobly_tests/tests/reboot_test.py show it and fail until it's fixed.
 
 2. Polish UI
 

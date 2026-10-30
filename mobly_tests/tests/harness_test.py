@@ -6,15 +6,19 @@
 
 import logging
 import pathlib
+import re
+import tempfile
 import unittest
 
+from mobly import config_parser
 from mobly import records
 from mobly import signals
 
 import run_suite
-from lib import app, app_log, baseline, bt_oracle, companion, device_test
+from lib import app, app_log, baseline, bt_oracle, companion, device_test, lock_screen
 
-TESTDATA = pathlib.Path(__file__).resolve().parents[1] / "testdata"
+MOBLY_TESTS = pathlib.Path(__file__).resolve().parents[1]
+TESTDATA = MOBLY_TESTS / "testdata"
 SAMPLE_LOG = pathlib.Path(__file__).resolve().parents[2] / "app/src/sharedTest/resources/sample_event_log.jsonl"
 QUDELIX = "0A:1B:2C:3D:4E:5F"
 
@@ -111,6 +115,67 @@ class CompanionTest(unittest.TestCase):
         dump32 = read("companiondevice", "api32_dumpsys.txt")
         self.assertIsNone(companion.parse_observing(dump32, app.PACKAGE, QUDELIX))
         self.assertIsNone(companion.parse_present(dump32, QUDELIX))
+
+
+class LockScreenTest(unittest.TestCase):
+    def test_credential(self):
+        self.assertFalse(lock_screen.parse_has_credential(read("lock_settings", "api28_none.txt")))
+        self.assertFalse(lock_screen.parse_has_credential(read("lock_settings", "api32_none.txt")))
+        self.assertTrue(lock_screen.parse_has_credential(read("lock_settings", "api36_pin.txt")))
+        self.assertTrue(lock_screen.parse_has_credential(read("lock_settings", "api28_none.txt").replace("SID = 0", "SID = 5f3e")))
+        with self.assertRaises(RuntimeError):
+            lock_screen.parse_has_credential("Current lock settings service state:\n")
+
+    def test_userState(self):
+        self.assertEqual(lock_screen.RUNNING_LOCKED, lock_screen.parse_user_state("RUNNING_LOCKED\n"))
+        self.assertEqual(lock_screen.RUNNING_UNLOCKED, lock_screen.parse_user_state("RUNNING_UNLOCKED"))
+        with self.assertRaises(RuntimeError):
+            lock_screen.parse_user_state("User is not started: 0")
+
+    def test_lockClass(self):
+        self.assertEqual(lock_screen.PURE_TEST_DEVICE, lock_screen.lock_class({"serial": "1", "pure_test_device": True}))
+        self.assertEqual(lock_screen.KNOWN_PASSWORD, lock_screen.lock_class({"serial": "1", "lock_password": "1234"}))
+        self.assertEqual(lock_screen.UNKNOWN_PASSWORD, lock_screen.lock_class({"serial": "1"}))
+        self.assertEqual(lock_screen.UNKNOWN_PASSWORD, lock_screen.lock_class({"serial": "1", "pure_test_device": False}))
+
+    def test_onlyThePin0000IsEverSetOrCleared(self):
+        """D24: no command of the suite sets or clears a credential, except the two hardcoded ones."""
+        changing = re.compile(r"(locksettings|cmd lock_settings)\s+(set-|clear|verify)")
+        found = []
+        for path in MOBLY_TESTS.rglob("*.py"):
+            relative = path.relative_to(MOBLY_TESTS)
+            if relative.parts[0] in (".venv", "results") or path == pathlib.Path(__file__).resolve():
+                continue
+            found += [(relative.as_posix(), line.strip()) for line in path.read_text(encoding="utf-8").splitlines()
+                      if changing.search(line)]
+        self.assertEqual([("lib/lock_screen.py", '_SET_PIN = "locksettings set-pin 0000"'),
+                          ("lib/lock_screen.py", '_CLEAR_PIN = "locksettings clear --old 0000"')], sorted(found, reverse=True))
+
+    def test_pinOnlyOnPureTestDevices(self):
+        for phone_class in (lock_screen.KNOWN_PASSWORD, lock_screen.UNKNOWN_PASSWORD):
+            with self.assertRaises(RuntimeError):
+                lock_screen.set_pin(None, phone_class)
+            with self.assertRaises(RuntimeError):
+                lock_screen.clear_pin(None, phone_class)
+
+    def test_passwordStaysOutOfTheMoblyConfig(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = pathlib.Path(directory)
+            testbed = directory / "testbed.yaml"
+            testbed.write_text('phones:\n  - serial: R1\n    lock_password: "0123"\n  - serial: R2\n    lock_password: 0123\n',
+                               encoding="utf-8")
+            path = run_suite.mobly_config(directory, "R1", {"serial": "R1", "lock_password": "0123"},
+                                          "qudelix", {"backend": "qudelix"}, testbed)
+            # The tests get the original testbed.yaml to read the password from
+            self.assertEqual(str(testbed), config_parser.load_test_config_file(str(path))[0].user_params["testbed"])
+            config = path.read_text(encoding="utf-8")
+            self.assertNotIn("0123", config)
+            self.assertNotIn("lock_password", config)
+            self.assertIn(f"lock_class: {lock_screen.KNOWN_PASSWORD}", config)
+            self.assertEqual("0123", lock_screen.password(testbed, "R1"))
+            # YAML reads it as the octal number 83
+            with self.assertRaises(ValueError):
+                lock_screen.password(testbed, "R2")
 
 
 class AppLogTest(unittest.TestCase):

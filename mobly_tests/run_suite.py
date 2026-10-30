@@ -10,8 +10,11 @@ Suites, in the order they run:
   journeys    L5, tests/journey_test.py
   bt_logic    L3, tests/bt_logic_test.py
   cold_start  L4, tests/cold_start_test.py
+  reboot      L4 tests that reboot the phone, tests/reboot_test.py
 The journeys need the screen on, so they run before the tests that turn it
-off or reboot.
+off or reboot. The reboot tests run last: a reboot with a secure lock screen
+is the slowest, and on some API levels it leaves the companion device
+manager broken until the next reboot (D26).
 
 Usage, from this folder:
   .venv/Scripts/python run_suite.py --build
@@ -46,13 +49,15 @@ from mobly.controllers.android_device_lib.adb import AdbProxy, AdbTimeoutError
 from lib import app
 from lib import device_state
 from lib import headset as headset_controller
+from lib import lock_screen
 from lib import sanity
 from lib.device_test import DeviceTest, is_not_applicable
 
 HERE = pathlib.Path(__file__).resolve().parent
-SUITES = ["ui", "journeys", "bt_logic", "cold_start"]
+SUITES = ["ui", "journeys", "bt_logic", "cold_start", "reboot"]
 # The module in tests/ of each Mobly suite
-MODULES = {"journeys": "journey_test", "bt_logic": "bt_logic_test", "cold_start": "cold_start_test", "smoke": "smoke_test"}
+MODULES = {"journeys": "journey_test", "bt_logic": "bt_logic_test", "cold_start": "cold_start_test", "reboot": "reboot_test",
+           "smoke": "smoke_test"}
 # Checks that the baseline is stable, run on its own with --suite smoke
 SMOKE = "smoke"
 
@@ -83,9 +88,15 @@ def install(adb):
         sys.exit(f"installed build {installed} isn't the working tree's {expected}, build first (--build)")
 
 
-def mobly_config(directory, serial, phone, headset_name, headset):
-    """Writes a Mobly config with the phone under test and the headset, returns its path."""
-    device = {"serial": serial, **{k: v for k, v in phone.items() if k != "serial"}}
+def mobly_config(directory, serial, phone, headset_name, headset, testbed):
+    """Writes a Mobly config with the phone under test and the headset, returns its path.
+
+    The phone's lock_password stays out of it: Mobly records the device config
+    in every test summary. The tests get the lock class and read the password
+    from [testbed] when they type it (D25).
+    """
+    device = {"serial": serial, "lock_class": lock_screen.lock_class(phone),
+              **{k: v for k, v in phone.items() if k not in ("serial", "pure_test_device", "lock_password")}}
     config = {
         "TestBeds": [{
             "Name": f"{headset_name}-{serial}",
@@ -93,6 +104,7 @@ def mobly_config(directory, serial, phone, headset_name, headset):
                 "AndroidDevice": [device],
                 "Headset": [headset],
             },
+            "TestParams": {"testbed": str(testbed)},
         }],
         "MoblyParams": {"LogPath": str(directory)},
     }
@@ -173,7 +185,7 @@ def failed_sanity(problems):
     return {"sanity": False}
 
 
-def run_phone(serial, phone, headset_name, headset, suites, directory, tests, other_serials):
+def run_phone(serial, phone, headset_name, headset, suites, directory, tests, other_serials, testbed):
     adb = AdbProxy(serial)
     print(f"{device_state.model(adb)} ({serial}), API {app.sdk(adb)}")
     directory.mkdir(parents=True, exist_ok=True)
@@ -186,7 +198,7 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests, ot
     device_suites = [s for s in suites if s != "ui"]
     if not device_suites:
         return results
-    config = mobly_config(directory, serial, phone, headset_name, headset)
+    config = mobly_config(directory, serial, phone, headset_name, headset, testbed)
     try:
         problems = sanity.connect_problems(adb, headset_controller.create([headset])[0], other_serials)
         if problems:
@@ -229,7 +241,7 @@ def main():
             install(AdbProxy(serial))
         others = [s for s in on_adb if s != serial]
         summary[serial] = run_phone(serial, phones[serial], args.headset, headsets[args.headset], suites,
-                                    directory / serial, args.test, others)
+                                    directory / serial, args.test, others, args.testbed.resolve())
     print(f"\nResults in {directory}")
     for serial, results in summary.items():
         print(f"  {serial}: " + ", ".join(f"{suite} {'passed' if ok else 'FAILED'}" for suite, ok in results.items()))

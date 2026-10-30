@@ -19,6 +19,7 @@ from lib import baseline
 from lib import bt_oracle
 from lib import device_state
 from lib import headset as headset_controller
+from lib import lock_screen
 
 
 class NotApplicable(signals.TestSkip):
@@ -57,9 +58,11 @@ class DeviceTest(base_test.BaseTestClass):
         self.adb = self.ad.adb
         self.log = app_log.AppLog(self.adb)
         self.sdk = app.sdk(self.adb)
-        # Declared per phone in testbed.yaml, see TestConcept.md section 2. Without it a phone is
-        # assumed to have one, so a test that can't work with one isn't run by mistake
-        self.secure_lock_screen = bool(getattr(self.ad, "secure_lock_screen", True))
+        # Declared per phone in testbed.yaml, run_suite.py passes on only the class (D24, D25).
+        # Without one a phone has a lock screen with an unknown password
+        self.lock_class = getattr(self.ad, "lock_class", lock_screen.UNKNOWN_PASSWORD)
+        # Where a known password is read from when it's typed
+        self.testbed = self.user_params.get("testbed")
         self.ad.log.info("API %d, headset %s (%s)", self.sdk, self.headset.name, self.headset.backend)
 
     def setup_test(self):
@@ -184,11 +187,18 @@ class BaselineTest(DeviceTest):
             self.collect_artifacts()
         # The next test's setup checks the result and reports what the repair missed as a leak
         try:
+            self.reset_phone()
             self.baseline.repair()
+        except signals.TestAbortSignal:
+            raise
         except Exception:
             self.ad.log.exception("restoring the baseline after %s failed", self._previous_test)
         if invariants:
             raise signals.TestFailure(f"the log's invariants are broken: {invariants}")
+
+    def reset_phone(self):
+        """Undoes what a test changed outside the baseline, after the artifacts are collected and before
+        the repair. Nothing by default; the reboot tests clear the PIN and reboot again (D26)."""
 
     def teardown_class(self):
         if self.leaks:

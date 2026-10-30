@@ -1,0 +1,20 @@
+Current lock settings service state:
+
+User State:
+  User 0
+    SP Handle: 1a2b3c4d5e6f7081
+    Last changed: 2026-10-30 01:23:36 (0f1e2d3c4b5a6978)
+    SID: 0
+    Quality: 0
+    CredentialType: None
+    SeparateChallenge: true
+    Metrics: known
+  
+Keys in namespace:
+  synthetic_password_1a2b3c4d5e6f7081
+  
+StrongAuth:
+  PrimaryAuthFlags state:
+    userId=0, primaryAuthFlags=0
+    
+PasswordHandleCount: 0

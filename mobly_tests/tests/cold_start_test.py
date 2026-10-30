@@ -35,7 +35,9 @@ C3_APPLIED = {32: True, 36: True}
 C9_FORCE_STOPPED_APPLIED = {28: False, 32: False, 36: True}
 
 
-class ColdStartTest(BaselineTest):
+class ColdStartBase(BaselineTest):
+    """The helpers of the L4 tests, also for the reboot tests."""
+
     @property
     def address(self):
         return self.headset.address
@@ -121,6 +123,8 @@ class ColdStartTest(BaselineTest):
                 return events
             time.sleep(1)
 
+
+class ColdStartTest(ColdStartBase):
     def test_c1_killed_app_applies_on_reconnect(self):
         """App process killed, the headset reconnects: applied. The manifest receiver handles A2DP connecting
         on every API level (D17), since API 31 the service may apply it first."""
@@ -258,22 +262,6 @@ class ColdStartTest(BaselineTest):
         asserts.assert_equal([], events, "the app logged something")
         dumped = bt_oracle.active_codec(self.adb, self.address)
         asserts.assert_true(self.baseline.own_codec.same_config(dumped), f"dumpsys shows {dumped}")
-
-    def test_c7_after_a_reboot(self):
-        """After a reboot, without opening the app: applied."""
-        self.require(not self.secure_lock_screen, "after a reboot the app can't run until the phone is unlocked")
-        codec = self.preferred_codec()
-        self.save_preferred(codec)
-        # The fixture granted the permission just before, and a reboot loses it until the system writes it
-        app.wait_permission_persisted(self.adb)
-        mark = self.log.last_seq()
-        self.ad.reboot()
-        # The phones have no secure lock screen, the keyguard only needs dismissing
-        device_state.wake(self.adb)
-        device_state.shell(self.adb, "wm dismiss-keyguard")
-        baseline.connect(self.adb, self.headset)
-        ops = self.wait_for_applied(mark, codec, timeout=120)
-        self.ad.log.info("C7: %s", self.describe(ops))
 
     def test_c8_after_an_update(self):
         """After an update, without opening the app: applied."""

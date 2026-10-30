@@ -1,0 +1,18 @@
+Current lock settings service state:
+
+DO Enabled: false
+
+User State:
+  User 0
+    LSKF-based SP protector ID: 1a2b3c4d5e6f7081
+    LSKF last changed: 2026-10-30 01:13:07 (previous protector: 8192a3b4c5d6e7f8)
+    Secure Mode: 0
+    SID: 0a1b2c3d4e5f6071
+    Quality: 0
+    CredentialType: PIN
+    SeparateChallenge: true
+    Metrics: known
+    failed attempt = 0
+  
+Keys in namespace:
+  synthetic_password_1a2b3c4d5e6f7081

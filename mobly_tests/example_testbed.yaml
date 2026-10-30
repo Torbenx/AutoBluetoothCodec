@@ -6,12 +6,16 @@
 # reported under its own testbed name (6.3 in TestConcept.md).
 
 phones:
-  # The serial as adb devices lists it
-  # A phone is assumed to have a secure lock screen: after a reboot the app can't
-  # run until the phone is unlocked
-  - serial: R0000000000     # A phone with one
-  - serial: 0123456789AB    # A phone without one
-    secure_lock_screen: false
+  # The serial as adb devices lists it, and the phone's lock screen class (D24 in TestConcept.md):
+  # A pure test device has no lock screen. The reboot tests set the PIN 0000 and clear it again
+  - serial: 0123456789AB
+    pure_test_device: true
+  # A personal phone with this PIN or password, which the reboot tests type after a reboot. In
+  # quotes: YAML reads 0123 as a number
+  - serial: R0000000000
+    lock_password: "0000"
+  # Neither: a lock screen with an unknown password, the phone isn't rebooted
+  - serial: R1111111111
 
 headsets:
   # The key is the name to pick it with run_suite.py --headset
