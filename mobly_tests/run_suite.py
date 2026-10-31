@@ -16,9 +16,14 @@ off or reboot. The reboot tests run last: a reboot with a secure lock screen
 is the slowest, and on some API levels it leaves the companion device
 manager broken until the next reboot (D26).
 
-Usage, from this folder:
+Build, than the the 'ui' suite on the phone <serial>:
+  .venv/Scripts/python run_suite.py --build --suite ui --phone <serial>
+Build, than run all suites except smoke on all phones:
   .venv/Scripts/python run_suite.py --build
-  .venv/Scripts/python run_suite.py --suite ui --phone <serial>
+Run the 'test_j1_first_start' test (from the 'journeys' suite) and
+the entire 'bt_logic' suite with the current build:
+  .venv/Scripts/python run_suite.py --test test_j1_first_start --suite bt_logic
+
 Before a phone's tests, sanity checks make sure it's plugged in, awake,
 unlocked, alone with Bluetooth on, and that the headset connects when
 Bluetooth turns on; a phone that fails them isn't tested. `--suite smoke`
@@ -60,6 +65,7 @@ MODULES = {"journeys": "journey_test", "bt_logic": "bt_logic_test", "cold_start"
            "smoke": "smoke_test"}
 # Checks that the baseline is stable, run on its own with --suite smoke
 SMOKE = "smoke"
+MOBLY_SUITES = [s for s in SUITES + [SMOKE] if s in MODULES]
 
 
 def load_testbed(path):
@@ -121,6 +127,10 @@ def test_classes(suite):
             and any(name.startswith("test_") for name in dir(cls))]
 
 
+def tests_in_suite(suite):
+    return [name for cls in test_classes(suite) for name in dir(cls) if name.startswith("test_")]
+
+
 class HideMoblySkips(logging.Filter):
     """Hides Mobly's console lines that call a test that didn't run SKIP or Skipped.
 
@@ -153,7 +163,7 @@ def run_mobly(config_path, suite, tests=None):
             if type(handler) is logging.StreamHandler:
                 handler.addFilter(HideMoblySkips())
         for cls in test_classes(suite):
-            # --test may name tests of several suites
+            # The tests of this suite may be in several of its classes
             own = [test for test in tests if hasattr(cls, test)] if tests else None
             if tests and not own:
                 continue
@@ -185,7 +195,7 @@ def failed_sanity(problems):
     return {"sanity": False}
 
 
-def run_phone(serial, phone, headset_name, headset, suites, directory, tests, other_serials, testbed):
+def run_phone(serial, phone, headset_name, headset, suites_and_tests, directory, other_serials, testbed):
     adb = AdbProxy(serial)
     print(f"{device_state.model(adb)} ({serial}), API {app.sdk(adb)}")
     directory.mkdir(parents=True, exist_ok=True)
@@ -193,10 +203,9 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests, ot
     if problems:
         return failed_sanity(problems)
     results = {}
-    if "ui" in suites:
+    if "ui" in suites_and_tests:
         results["ui"] = run_ui(adb, directory)
-    device_suites = [s for s in suites if s != "ui"]
-    if not device_suites:
+    if suites_and_tests.keys() == {"ui"}:
         return results
     config = mobly_config(directory, serial, phone, headset_name, headset, testbed)
     try:
@@ -204,8 +213,9 @@ def run_phone(serial, phone, headset_name, headset, suites, directory, tests, ot
         if problems:
             results.update(failed_sanity(problems))
             return results
-        for suite in device_suites:
-            results[suite] = run_mobly(config, suite, tests)
+        for suite in MOBLY_SUITES:
+            if suite in suites_and_tests:
+                results[suite] = run_mobly(config, suite, suites_and_tests[suite])
     finally:
         device_state.set_bluetooth(adb, False)
     return results
@@ -215,8 +225,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--headset", default="qudelix", help="a headset of testbed.yaml (default qudelix)")
     ap.add_argument("--phone", action="append", help="serial of a phone to test, all on adb by default")
-    ap.add_argument("--suite", action="append", choices=SUITES + [SMOKE], help="suites to run, all but smoke by default")
-    ap.add_argument("--test", action="append", help="run only these tests of the device suites")
+    ap.add_argument("--suite", action="append", default=[], choices=SUITES + [SMOKE], help="suites to run")
+    ap.add_argument("--test", action="append", default=[], help="tests to run")
     ap.add_argument("--build", action="store_true", help="build with Gradle first")
     ap.add_argument("--no-install", action="store_true", help="test the build that is installed")
     ap.add_argument("--testbed", type=pathlib.Path, default=HERE / "testbed.yaml")
@@ -230,7 +240,24 @@ def main():
     missing = [s for s in serials if s not in on_adb or s not in phones]
     if missing:
         sys.exit(f"not on adb or not in {args.testbed.name}: {', '.join(missing)}")
-    suites = [s for s in SUITES + [SMOKE] if s in (args.suite or SUITES)]
+    requested_suites = [s for s in SUITES + [SMOKE] if s in args.suite] if args.suite or args.test else SUITES
+
+    test_to_suite = {test: suite for suite in MOBLY_SUITES for test in tests_in_suite(suite)}
+    filtered_suites = {}
+    for test in args.test:
+        suite = test_to_suite.get(test)
+        if not suite:
+            sys.exit(f"test '{test}' not found")
+        tests = filtered_suites.setdefault(suite, [])
+        if test not in tests:
+            tests.append(test)
+
+    request_overlap = set(requested_suites) & set(filtered_suites.keys())
+    if request_overlap:
+        report_suite = next(iter(request_overlap))
+        sys.exit(f"suite '{report_suite}' requested explicitly and via tests '{"', '".join(filtered_suites[report_suite])}'")
+
+    suites_and_tests = filtered_suites | {suite: None for suite in requested_suites}
 
     if args.build:
         build()
@@ -240,8 +267,8 @@ def main():
         if not args.no_install:
             install(AdbProxy(serial))
         others = [s for s in on_adb if s != serial]
-        summary[serial] = run_phone(serial, phones[serial], args.headset, headsets[args.headset], suites,
-                                    directory / serial, args.test, others, args.testbed.resolve())
+        summary[serial] = run_phone(serial, phones[serial], args.headset, headsets[args.headset], suites_and_tests,
+                                    directory / serial, others, args.testbed.resolve())
     print(f"\nResults in {directory}")
     for serial, results in summary.items():
         print(f"  {serial}: " + ", ".join(f"{suite} {'passed' if ok else 'FAILED'}" for suite, ok in results.items()))
