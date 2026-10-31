@@ -190,8 +190,10 @@ class LogActivity : ComponentActivity() {
     }
 
     private fun shareLog(mode: LogExport.Mode) {
+        // Sharing is only offered once the events are loaded
+        val events = log.events.value ?: return
         val uri = try {
-            LogExport.write(this, log.events.value, mode)
+            LogExport.write(this, events, mode)
         } catch (e: IOException) {
             Log.e(TAG, "exporting the log failed", e)
             Toast.makeText(this, "Exporting the log failed", Toast.LENGTH_SHORT).show()

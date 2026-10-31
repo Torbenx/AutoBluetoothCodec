@@ -13,12 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.FileNotFoundException
-import java.io.FileOutputStream
-import java.io.IOException
-import java.io.RandomAccessFile
 import java.util.UUID
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -32,7 +27,10 @@ import java.util.concurrent.TimeoutException
  * Logging can be disabled with [setEnabled], which deletes the log. While disabled, events only go to
  * Logcat.
  *
- * Must be used on the main thread. The file is written on a background thread, [flush] waits for it.
+ * Must be used on the main thread. The events and the files are kept on a background thread by an
+ * [EventStore], so nothing here waits for the file: [events] is null until the file is loaded, and
+ * lags behind the events logged until the background thread has handled them. [flush] runs an
+ * action once it has.
  */
 class EventLog private constructor(context: Context) {
     companion object {
@@ -55,6 +53,22 @@ class EventLog private constructor(context: Context) {
 
         fun get(context: Context): EventLog {
             return instance ?: EventLog(context.applicationContext).also { instance = it }
+        }
+
+        /**
+         * Waits up to [timeoutMillis] until the events logged so far are written, for components
+         * whose end may end the process. Returns false if they aren't written by then, and true right
+         * away if the log isn't open in this process.
+         */
+        fun awaitWritten(timeoutMillis: Long): Boolean {
+            val log = instance ?: return true
+            return try {
+                log.executor.submit {}.get(timeoutMillis, TimeUnit.MILLISECONDS)
+                true
+            } catch (e: TimeoutException) {
+                Log.w(TAG, "the log wasn't written within $timeoutMillis ms")
+                false
+            }
         }
 
         /**
@@ -121,124 +135,52 @@ class EventLog private constructor(context: Context) {
         }
 
         internal fun getFile(context: Context) = File(File(context.filesDir, DIRECTORY), FILE_NAME)
+
+        internal fun toLogcat(event: LogEvent): String {
+            return buildString {
+                append(event.type)
+                event.opUID?.let { append(" op=").append(it.take(8)) }
+                event.device?.let { append(" device=").append(it.address) }
+                event.attempt?.let { append(" attempt=").append(it) }
+                event.config?.let { append(" config=").append(it.android) }
+                event.actual?.let { append(" actual=").append(it.android) }
+                event.message?.let { append(": ").append(it) }
+            }
+        }
     }
 
     private val debuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
-    private val upsFile = AtomicFile(getFile(context))
-    private val dpsFile = getFile(context.createDeviceProtectedStorageContext())
     private val executor = Executors.newSingleThreadExecutor()
     private val preferences = preferences(context)
     private val userManager = context.getSystemService(UserManager::class.java)
     private val openOperations = HashSet<String>()
     // Open operations whose trigger is in the log, the events of the others aren't logged
     private val loggedOperations = HashSet<String>()
-    private var nextSeq = 0L
-    // Lines in the file, which may contain more events than are kept until it's rewritten
-    private var fileLineCount = 0
 
+    // Whether the load of the user protected file is queued, the events after it go to that file
     private var userStorageInitialized: Boolean = false
 
-    private val mutableEvents = MutableStateFlow<List<LogEvent>>(emptyList())
-    private val readEvents: StateFlow<List<LogEvent>> = mutableEvents.asStateFlow()
+    private val mutableEvents = MutableStateFlow<List<LogEvent>?>(null)
+    private val readEvents: StateFlow<List<LogEvent>?> = mutableEvents.asStateFlow()
+
+    // Only used on the executor's thread
+    private val store = EventStore(
+        AtomicFile(getFile(context)), getFile(context.createDeviceProtectedStorageContext()), mutableEvents)
 
     private val mutableEnabled = MutableStateFlow(preferences.getBoolean(KEY_ENABLED, true))
     val enabled: StateFlow<Boolean> = mutableEnabled.asStateFlow()
 
     init {
-        dpsFile.parentFile?.mkdirs()
-        // Left over if the process died before deleting it
-        if (!enabled.value)
-            dpsFile.delete()
-
+        val enabled = enabled.value
+        executor.execute { store.open(enabled) }
         updateUserUnlocked()
-        if (!userStorageInitialized)
-            executor.execute { endPartialLine(dpsFile) }
-    }
-
-    /** Ends a line left partial by an interrupted append, so the next event starts a line of its own. */
-    private fun endPartialLine(file: File) {
-        if (!file.exists())
-            return
-        try {
-            RandomAccessFile(file, "rw").use {
-                if (it.length() == 0L)
-                    return
-                it.seek(it.length() - 1)
-                if (it.read() != '\n'.code)
-                    it.write('\n'.code)
-            }
-        } catch (e: IOException) {
-            Log.w(TAG, "repairing the device protected log failed", e)
-        }
     }
 
     private fun initWithUnlockedUser() {
         userStorageInitialized = true
-        upsFile.baseFile.parentFile?.mkdirs()
-        // Left over if the process died before deleting it
-        if (!enabled.value)
-            upsFile.delete()
-
-        // Wait for pending writes to the device protected file and read its contents
-        val future = executor.submit<List<String>> {
-            try {
-                dpsFile.bufferedReader().use { it.readLines() }
-            } catch (e: FileNotFoundException) {
-                emptyList()
-            } catch (e: IOException) {
-                Log.w(TAG, "reading the device protected log failed", e)
-                emptyList()
-            } finally {
-                dpsFile.delete()
-            }
-        }
-
-        val upsLines = try {
-            upsFile.openRead().bufferedReader().use { it.readLines() }
-        } catch (e: FileNotFoundException) {
-            emptyList()
-        } catch (e: IOException) {
-            Log.w(TAG, "reading the user protected log failed", e)
-            emptyList()
-        }
-        val upsEvents = parse(upsLines)
-        val upsParseDroppedLines = upsEvents.size != upsLines.size
-        nextSeq = (upsEvents.maxOfOrNull { it.seq } ?: -1) + 1
-
-        val dpsLines = try {
-            future.get(5, TimeUnit.SECONDS)
-        } catch (e: TimeoutException) {
-            Log.w(TAG, "reading the device protected log timed out, its events are lost", e)
-            emptyList()
-        } catch (e: ExecutionException) {
-            Log.w(TAG, "reading the device protected log failed", e)
-            emptyList()
-        }
-        val dpsEvents = parse(dpsLines).map { it.copy(seq = nextSeq++) }
-
-        val allFileEvents = upsEvents + dpsEvents
-        // Add interruption events for stale operations
-        val interruptionEvents = findUnresolved(allFileEvents)
-            .filter { it.opUID !in openOperations }
-            .map {
-                val event = LogEvent(
-                    LogEvent.VERSION, nextSeq++,
-                    System.currentTimeMillis(), EventType.OPERATION_INTERRUPTED,
-                    opUID = it.opUID, device = it.device)
-                Log.i(TAG, toLogcat(event))
-                event
-            }
-
-        val allEvents = allFileEvents + interruptionEvents
-        mutableEvents.value = trim(allEvents, MAX_EVENTS)
-        fileLineCount = allEvents.size
-        if (
-            mutableEvents.value.size != allEvents.size ||
-            interruptionEvents.isNotEmpty() || dpsEvents.isNotEmpty() ||
-            upsParseDroppedLines
-        ) {
-            rewrite()
-        }
+        val open = HashSet(openOperations)
+        val enabled = enabled.value
+        executor.execute { store.load(open, enabled) }
     }
 
     fun isUserStorageInitialized() = userStorageInitialized
@@ -279,8 +221,8 @@ class EventLog private constructor(context: Context) {
     /** Removes all events, except those of open operations. */
     fun clear() {
         checkEventAccess()
-        mutableEvents.value = mutableEvents.value.filter { it.opUID in openOperations }
-        rewrite()
+        val open = HashSet(openOperations)
+        executor.execute { store.clear(open) }
     }
 
     /**
@@ -294,9 +236,7 @@ class EventLog private constructor(context: Context) {
         mutableEnabled.value = enabled
         if (!enabled) {
             loggedOperations.clear()
-            mutableEvents.value = emptyList()
-            fileLineCount = 0
-            executor.execute { dpsFile.delete(); upsFile.delete() }
+            executor.execute { store.deleteAll() }
         }
     }
 
@@ -305,7 +245,8 @@ class EventLog private constructor(context: Context) {
         executor.execute(action)
     }
 
-    val events: StateFlow<List<LogEvent>>
+    /** The events, oldest first, or null until the file is loaded. */
+    val events: StateFlow<List<LogEvent>?>
         get() {
             checkEventAccess()
             return readEvents
@@ -342,7 +283,8 @@ class EventLog private constructor(context: Context) {
         updateUserUnlocked()
         val event = LogEvent(
             v = LogEvent.VERSION,
-            seq = nextSeq++,
+            // Numbered by the store
+            seq = 0,
             time = System.currentTimeMillis(),
             type = type,
             opUID = opUID,
@@ -355,69 +297,7 @@ class EventLog private constructor(context: Context) {
         Log.i(TAG, toLogcat(event))
         if (!logged || !enabled.value)
             return
-
-        if (userStorageInitialized) {
-            mutableEvents.value = trim(mutableEvents.value + event, MAX_EVENTS)
-            if (fileLineCount + 1 >= 2 * MAX_EVENTS) {
-                rewrite()
-                return
-            }
-            fileLineCount += 1
-            val line = json.encodeToString(event) + "\n"
-            executor.execute {
-                try {
-                    FileOutputStream(upsFile.baseFile, true).use { it.write(line.toByteArray()) }
-                } catch (e: IOException) {
-                    Log.w(TAG, "appending to the user protected log file failed", e)
-                }
-            }
-        } else {
-            val line = json.encodeToString(event) + "\n"
-            executor.execute {
-                try {
-                    FileOutputStream(dpsFile, true).use { it.write(line.toByteArray()) }
-                } catch (e: IOException) {
-                    Log.w(TAG, "appending to the device protected log file failed", e)
-                }
-            }
-        }
-    }
-
-    private fun rewrite() {
-        val events = mutableEvents.value
-        fileLineCount = events.size
-        executor.execute {
-            val stream = try {
-                upsFile.startWrite()
-            } catch (e: IOException) {
-                Log.w(TAG, "rewriting the log failed", e)
-                return@execute
-            }
-            try {
-                val writer = stream.bufferedWriter()
-                for (event in events) {
-                    writer.write(json.encodeToString(event))
-                    writer.write("\n")
-                }
-                writer.flush()
-                upsFile.finishWrite(stream)
-            } catch (e: IOException) {
-                Log.w(TAG, "rewriting the log failed", e)
-                upsFile.failWrite(stream)
-            }
-        }
-    }
-
-    private fun toLogcat(event: LogEvent): String {
-        return buildString {
-            append(event.type)
-            event.opUID?.let { append(" op=").append(it.take(8)) }
-            event.device?.let { append(" device=").append(it.address) }
-            event.attempt?.let { append(" attempt=").append(it) }
-            event.config?.let { append(" config=").append(it.android) }
-            event.actual?.let { append(" actual=").append(it.android) }
-            event.message?.let { append(": ").append(it) }
-        }
+        executor.execute { store.append(event) }
     }
 
     /**

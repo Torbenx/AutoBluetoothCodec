@@ -50,7 +50,15 @@ object TestSupport {
 
     fun runPending() = shadowOf(Looper.getMainLooper()).idle()
 
-    val events: List<LogEvent> get() = EventLog.get(context).events.value
+    /**
+     * The logged events, once the log's background thread has handled everything logged so far.
+     * Reading them notices an unlock first, like reading [EventLog.events] does.
+     */
+    val events: List<LogEvent> get() {
+        val flow = EventLog.get(context).events
+        flushLog()
+        return flow.value!!
+    }
 
     /** The events of the operation [uid], in order. */
     fun operation(uid: String) = events.filter { it.opUID == uid }

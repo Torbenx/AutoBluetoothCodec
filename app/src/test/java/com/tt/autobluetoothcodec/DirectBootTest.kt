@@ -86,7 +86,7 @@ class DirectBootTest {
         assertThrows(IllegalStateException::class.java) { log.clear() }
         // Clearing didn't drop the locked event
         setUserUnlocked(true)
-        assertEquals(listOf("a"), log.events.value.map { it.message })
+        assertEquals(listOf("a"), TestSupport.events.map { it.message })
     }
 
     @Test
@@ -99,7 +99,7 @@ class DirectBootTest {
         assertEquals(3, lines(dpsFile).size)
 
         setUserUnlocked(true)
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(
             listOf(EventType.A2DP_CONNECTED, EventType.CODEC_VERIFIED, EventType.TEST_LABEL,
                 EventType.A2DP_CONNECTED, EventType.CODEC_VERIFIED),
@@ -119,7 +119,7 @@ class DirectBootTest {
         setUserUnlocked(true)
         // Merges the locked events before it takes its own number
         log.log(EventType.TEST_LABEL, message = "c")
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(listOf("old", "old", "old", "old", "old", "a", "b", "c"), events.map { it.message })
         assertSequence(events)
         assertEquals(events, EventLog.parse(lines(upsFile)))
@@ -130,7 +130,7 @@ class DirectBootTest {
         restartLocked()
         log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice(ADDRESS), actual = LogCodecConfig.of(sbc()))
         setUserUnlocked(true)
-        assertEquals(sbc().toAndroid(), log.events.value.single().actual!!.android)
+        assertEquals(sbc().toAndroid(), TestSupport.events.single().actual!!.android)
         flushLog()
         assertFalse(dpsFile.exists())
         assertEquals(1, lines(upsFile).size)
@@ -144,7 +144,7 @@ class DirectBootTest {
         setUserUnlocked(true)
         assertTrue(operation.isOpen)
         operation.resolve(EventType.CODEC_VERIFIED)
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(
             listOf(EventType.A2DP_CONNECTED, EventType.SET_CODEC_CONFIG, EventType.CODEC_VERIFIED),
             events.map { it.type })
@@ -161,7 +161,7 @@ class DirectBootTest {
         EventLog.restartForTest()
         val alive = log.begin(EventType.A2DP_CONNECTED, LogDevice(ADDRESS))
         setUserUnlocked(true)
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(
             listOf(EventType.A2DP_CONNECTED, EventType.A2DP_CONNECTED, EventType.OPERATION_INTERRUPTED),
             events.map { it.type })
@@ -169,9 +169,9 @@ class DirectBootTest {
         assertSequence(events)
         // The operation of this process isn't interrupted
         alive.resolve(EventType.CODEC_VERIFIED)
-        assertEquals(EventType.CODEC_VERIFIED, log.events.value.last().type)
-        assertEquals(alive.uid, log.events.value.last().opUID)
-        assertEquals(log.events.value, EventLog.parse(lines(upsFile)))
+        assertEquals(EventType.CODEC_VERIFIED, TestSupport.events.last().type)
+        assertEquals(alive.uid, TestSupport.events.last().opUID)
+        assertEquals(TestSupport.events, EventLog.parse(lines(upsFile)))
     }
 
     @Test
@@ -180,7 +180,7 @@ class DirectBootTest {
         restartLocked()
         log.log(EventType.TEST_LABEL, message = "a")
         setUserUnlocked(true)
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(
             listOf(EventType.USER_SET_CODEC, EventType.SET_CODEC_CONFIG, EventType.TEST_LABEL,
                 EventType.OPERATION_INTERRUPTED),
@@ -200,8 +200,8 @@ class DirectBootTest {
         EventLog.restartForTest()
         log.log(EventType.TEST_LABEL, message = "c")
         setUserUnlocked(true)
-        assertEquals(listOf("a", "b", "c"), log.events.value.map { it.message })
-        assertSequence(log.events.value)
+        assertEquals(listOf("a", "b", "c"), TestSupport.events.map { it.message })
+        assertSequence(TestSupport.events)
     }
 
     @Test
@@ -212,11 +212,11 @@ class DirectBootTest {
         // The process dies before the user unlocks, the next one starts after
         setUserUnlocked(true)
         EventLog.restartForTest()
-        assertEquals(listOf("old", "a"), log.events.value.map { it.message })
-        assertSequence(log.events.value)
+        assertEquals(listOf("old", "a"), TestSupport.events.map { it.message })
+        assertSequence(TestSupport.events)
         flushLog()
         assertFalse(dpsFile.exists())
-        assertEquals(log.events.value, EventLog.parse(lines(upsFile)))
+        assertEquals(TestSupport.events, EventLog.parse(lines(upsFile)))
     }
 
     @Test
@@ -225,7 +225,7 @@ class DirectBootTest {
         restartLocked()
         repeat(5) { log.log(EventType.TEST_LABEL, message = "$it") }
         setUserUnlocked(true)
-        val events = log.events.value
+        val events = TestSupport.events
         assertEquals(EventLog.MAX_EVENTS, events.size)
         assertEquals(listOf("0", "1", "2", "3", "4"), events.takeLast(5).map { it.message })
         assertSequence(events, first = 5)
@@ -242,9 +242,9 @@ class DirectBootTest {
         EventLog.restartForTest()
         log.log(EventType.TEST_LABEL, message = "b")
         setUserUnlocked(true)
-        assertEquals(listOf("a", "b"), log.events.value.map { it.message })
-        assertSequence(log.events.value)
-        assertEquals(log.events.value, EventLog.parse(lines(upsFile)))
+        assertEquals(listOf("a", "b"), TestSupport.events.map { it.message })
+        assertSequence(TestSupport.events)
+        assertEquals(TestSupport.events, EventLog.parse(lines(upsFile)))
     }
 
     @Test
@@ -256,7 +256,7 @@ class DirectBootTest {
         flushLog()
         assertFalse(dpsFile.exists())
         setUserUnlocked(true)
-        assertEquals(emptyList<LogEvent>(), log.events.value)
+        assertEquals(emptyList<LogEvent>(), TestSupport.events)
         assertFalse(upsFile.exists())
     }
 
@@ -283,7 +283,7 @@ class DirectBootTest {
         assertFalse(dpsFile.exists())
         setUserUnlocked(true)
         operation.resolve(EventType.CODEC_VERIFIED)
-        assertEquals(emptyList<LogEvent>(), log.events.value)
+        assertEquals(emptyList<LogEvent>(), TestSupport.events)
         flushLog()
         assertFalse(upsFile.exists())
     }
@@ -295,7 +295,7 @@ class DirectBootTest {
         log.log(EventType.TEST_LABEL, message = "a")
         setUserUnlocked(true)
         log.clear()
-        assertEquals(listOf(open.uid), log.events.value.map { it.opUID })
+        assertEquals(listOf(open.uid), TestSupport.events.map { it.opUID })
         open.resolve(EventType.CODEC_VERIFIED)
         assertEquals(listOf(open.uid, open.uid), EventLog.parse(lines(upsFile)).map { it.opUID })
     }

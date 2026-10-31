@@ -37,6 +37,7 @@ import androidx.core.content.IntentCompat
 class CodecCompanionService : CompanionDeviceService() {
     companion object {
         private const val TAG = "CodecCompanionService"
+        private const val AWAIT_LOG_MILLIS = 1000L
     }
 
     private val applier by lazy { CodecApplier.get(this) }
@@ -131,6 +132,10 @@ class CodecCompanionService : CompanionDeviceService() {
             unregisterReceiver(a2dpReceiver)
             receiverRegistered = false
         }
+        // The system may have started the process only for the last event, like a device that
+        // disappeared, which may still wait for the log to load. Without the bound service, the
+        // process could be killed before it's written
+        EventLog.awaitWritten(AWAIT_LOG_MILLIS)
     }
 
     private fun applyCodec(device: BluetoothDevice, operation: EventLog.Operation) {
