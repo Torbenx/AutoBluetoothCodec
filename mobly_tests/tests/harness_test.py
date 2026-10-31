@@ -140,7 +140,7 @@ class LockScreenTest(unittest.TestCase):
 
     def test_onlyThePin0000IsEverSetOrCleared(self):
         """D24: no command of the suite sets or clears a credential, except the two hardcoded ones."""
-        changing = re.compile(r"(locksettings|cmd lock_settings)\s+(set-|clear|verify)")
+        changing = re.compile(r"(locksettings|cmd lock_settings)\s+(set-|clear)")
         found = []
         for path in MOBLY_TESTS.rglob("*.py"):
             relative = path.relative_to(MOBLY_TESTS)
