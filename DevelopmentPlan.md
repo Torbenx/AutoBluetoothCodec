@@ -15,8 +15,8 @@
    * Profile Log Activity (Done)
    * Setup testing using Mobly (Done)
    * Add open source licences somewhere (Done)
-   * There is potential issue with applying the codec after a restart when A2DP connects before the first unlock and the app nevers sees the broadcast.
-     C14 and C15 in mobly_tests/tests/reboot_test.py show it and fail until it's fixed.
+   * Applying the codec after a restart when A2DP connects before the first unlock (Done: the receiver and the service are direct boot aware, C14 and C15).
+   * Disable the companion service on API 31-32, link there only for the auto revoke exemption (Done, D27 in mobly_tests/TestConcept.md).
 
 2. Polish UI
 

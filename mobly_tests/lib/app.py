@@ -108,6 +108,36 @@ def clear_data(adb):
         raise RuntimeError(f"pm clear failed: {out}")
 
 
+AUTO_REVOKE_OP = "AUTO_REVOKE_PERMISSIONS_IF_UNUSED"
+
+
+def parse_auto_revoke_mode(output):
+    """The mode of AUTO_REVOKE_PERMISSIONS_IF_UNUSED that applies, from `appops get PACKAGE OP`.
+
+    A "Uid mode" line is the user's choice in the app's settings and wins over
+    the package's mode, which a link sets to ignore. "default" when neither is
+    set, None where the op doesn't exist (API 28).
+    """
+    if "Unknown operation" in output:
+        return None
+    uid = re.search(rf"^Uid mode: {AUTO_REVOKE_OP}: (\w+)", output, re.MULTILINE)
+    if uid:
+        return uid.group(1)
+    package = re.search(rf"^{AUTO_REVOKE_OP}: (\w+)", output, re.MULTILINE)
+    return package.group(1) if package else "default"
+
+
+def auto_revoke_mode(adb):
+    """"ignore" while the app is exempt from losing its permissions when unused, see parse_auto_revoke_mode."""
+    return parse_auto_revoke_mode(device_state.shell(adb, f"appops get {PACKAGE} {AUTO_REVOKE_OP}"))
+
+
+def reset_auto_revoke(adb):
+    """Removes the exemption and the user's choice, as on a fresh install that was never linked."""
+    device_state.shell(adb, f"appops set --uid {PACKAGE} {AUTO_REVOKE_OP} default")
+    device_state.shell(adb, f"appops set {PACKAGE} {AUTO_REVOKE_OP} default")
+
+
 def data_files(adb):
     """The files the app stores, relative to its data directory."""
     out = device_state.shell(adb, f"run-as {PACKAGE} sh -c 'ls -1 files/logs shared_prefs 2>/dev/null' || true")

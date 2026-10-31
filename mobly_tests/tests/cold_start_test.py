@@ -24,13 +24,14 @@ SNIPPET = "snippet"
 SBC_44_16 = Codec(bt_oracle.SBC, 0x1, 0x1)
 AAC_44_16 = Codec(bt_oracle.AAC, 0x1, 0x1)
 APPLY_TIMEOUT = 60.0
-# The API 32 Pixel sees a device appear through BLE scans, which took from seconds to over 90 s
+# A device seen through BLE scans took from seconds to over 90 s to appear, on API 32 before its
+# companion service was disabled
 APPEARANCE_TIMEOUT = 180.0
 
 # Characterization tests (D8), their results recorded per API level on the testbed (6.7).
 # C3: whether the preferred codec is applied when A2DP connects after the process was killed while
 # the device was present. On API 36 too since the manifest receiver is enabled there (D17).
-C3_APPLIED = {32: True, 36: True}
+C3_APPLIED = {36: True}
 # C9: whether the preferred codec is applied when the device connects after a force stop.
 C9_FORCE_STOPPED_APPLIED = {28: False, 32: False, 36: True}
 
@@ -48,12 +49,12 @@ class ColdStartBase(BaselineTest):
         return AAC_44_16 if own is not None and own.codec_type == bt_oracle.SBC else SBC_44_16
 
     def save_preferred(self, codec):
-        """Saves [codec] as preferred through the snippet, which also observes the device since API 31."""
+        """Saves [codec] as preferred through the snippet, which also observes the device since API 33."""
         self.ad.load_snippet(SNIPPET, app.SNIPPET_PACKAGE)
         try:
             getattr(self.ad, SNIPPET).setPreferredCodec(self.address, codec.to_app())
-            # On API 32 the device appears right after observing starts. The service only logs that,
-            # it applies the codec when A2DP connects, so unloading the snippet interrupts nothing
+            # The device may appear right after observing starts. The service only logs that, it
+            # applies the codec when A2DP connects, so unloading the snippet interrupts nothing
             self.wait_until_resolved(timeout=15)
         finally:
             self.ad.unload_snippet(SNIPPET)
@@ -127,11 +128,11 @@ class ColdStartBase(BaselineTest):
 class ColdStartTest(ColdStartBase):
     def test_c1_killed_app_applies_on_reconnect(self):
         """App process killed, the headset reconnects: applied. The manifest receiver handles A2DP connecting
-        on every API level (D17), since API 31 the service may apply it first."""
+        on every API level (D17), since API 33 the service may apply it first."""
         codec = self.preferred_codec()
         self.save_preferred(codec)
         self.headset_off()
-        # Since API 31 the system unbinds the service once the device is gone, 7 to 8 s on API 32
+        # Since API 33 the system unbinds the service once the device is gone, after some seconds
         time.sleep(15)
         app.kill(self.adb)
         time.sleep(3)
@@ -176,7 +177,7 @@ class ColdStartTest(ColdStartBase):
 
     def test_c3_killed_while_present_then_a2dp_connects(self):
         """Characterization: the process is killed while the device is present with A2DP down, then A2DP connects."""
-        self.require(self.sdk >= 31, "presence is only observed since API 31")
+        self.require(self.sdk >= 33, "presence is only observed since API 33")
         self.require_capability(headset.A2DP_SWITCH)
         self.require_capability(headset.POWER_SWITCH)
         codec = self.preferred_codec()
@@ -226,20 +227,21 @@ class ColdStartTest(ColdStartBase):
         asserts.assert_equal([], app_log.check_structure(events), "the log after the next start")
 
     def test_c5_permission_revoked(self):
-        """Without the permission, the device connects: the service logs its appearance, nothing is
-        applied, no crash."""
+        """Without the permission, the device connects: since API 33 the service logs its appearance,
+        nothing is applied, no crash."""
         self.require(self.sdk >= 31, "the permission exists since API 31")
         codec = self.preferred_codec()
         self.save_preferred(codec)
         app.revoke_permission(self.adb)
         # Without the permission the receivers get no broadcast, only the device appearing again starts
-        # the service, which applies nothing until A2DP connects. On API 32 a device is gone 7 to 8 s
-        # after its BLE advertisements stop.
+        # the service, which applies nothing until A2DP connects. A device is gone some seconds after
+        # its BLE advertisements stop.
         self.headset_off()
         time.sleep(15)
         mark = self.log.last_seq()
         self.headset_on()
-        self.log.wait_for_event("DEVICE_APPEARED", after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
+        if self.sdk >= 33:
+            self.log.wait_for_event("DEVICE_APPEARED", after=mark, device=self.address, timeout=APPEARANCE_TIMEOUT)
         bt_oracle.wait_connected(self.adb, self.address, timeout=baseline.CONNECT_TIMEOUT)
         time.sleep(10)
         ops = app_log.operations(self.log.events_after(mark))

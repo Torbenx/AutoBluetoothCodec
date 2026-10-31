@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CodecCompanionService is only enabled since API 33, see values-v33 -->
+    <bool name="companion_service_enabled">false</bool>
+</resources>

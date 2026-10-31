@@ -8,29 +8,37 @@ import android.companion.ObservingDevicePresenceRequest
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import androidx.annotation.ChecksSdkIntAtLeast
 import androidx.annotation.RequiresApi
 
 /**
- * Since API 31 the system binds [CodecCompanionService] when an observed device appears, and since
- * API 33 keeps it bound while the device is present. A device is observed while it's associated and
- * has a preferred codec. [A2dpConnectReceiver] applies the preferred codec when A2DP connects on
- * every phone, with or without the companion device feature.
+ * Since API 33 the system binds [CodecCompanionService] when an observed device appears, and keeps
+ * it bound while the device is present. A device is observed while it's associated and has a
+ * preferred codec. [A2dpConnectReceiver] applies the preferred codec when A2DP connects on every
+ * phone, with or without the companion device feature.
+ *
+ * On API 31 and 32 nothing is observed and the service is disabled: the system unbinds it right
+ * after reporting a device, before A2DP connects, and forgets at every reboot that a device is
+ * observed.
  */
 object CompanionPresence {
     private const val TAG = "CompanionPresence"
 
     /** [logChange] logs the observing state to the [EventLog], failures are logged anyway. */
     fun update(context: Context, device: BluetoothDevice, logChange: Boolean = true) {
-        if (Build.VERSION.SDK_INT < 31 || !PermissionUtil.canAssociate(context))
+        if (!canObserve(context))
             return
         setObserving(context, device, PreferredCodecStore.get(context, device) != null, logChange)
     }
 
     fun stopObserving(context: Context, device: BluetoothDevice) {
-        if (Build.VERSION.SDK_INT < 31 || !PermissionUtil.canAssociate(context))
+        if (!canObserve(context))
             return
         setObserving(context, device, false, logChange = true)
     }
+
+    @ChecksSdkIntAtLeast(api = 33)
+    private fun canObserve(context: Context) = Build.VERSION.SDK_INT >= 33 && PermissionUtil.canAssociate(context)
 
     /**
      * Brings the observed devices in line with the stored state.
@@ -48,7 +56,7 @@ object CompanionPresence {
         }
     }
 
-    @RequiresApi(31)
+    @RequiresApi(33)
     private fun setObserving(context: Context, device: BluetoothDevice, observe: Boolean, logChange: Boolean) {
         if (Build.VERSION.SDK_INT >= 36) {
             setObservingById(context, device, observe, logChange)

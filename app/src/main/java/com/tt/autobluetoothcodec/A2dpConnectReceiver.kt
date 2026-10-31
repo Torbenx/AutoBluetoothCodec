@@ -16,11 +16,11 @@ import androidx.core.content.IntentCompat
  * doesn't put the receiving app on the temporary allowlist, so starting a service from here would
  * be refused in the background. The work is done within the broadcast via [goAsync] instead.
  *
- * It's enabled on every API level. Since API 31 [CodecCompanionService] applies the preferred codec
- * too, but it doesn't always run when A2DP connects: on API 31 and 32 the system only binds it for
- * its callbacks, and since API 33 it doesn't start a killed process again while the device stays
- * present. When both apply it, the second request resolves ALREADY_PENDING, or verifies the codec
- * that is already active.
+ * It's enabled on every API level, and up to API 32 it's the only component that applies the
+ * preferred codec automatically. Since API 33 [CodecCompanionService] applies it too, but it doesn't
+ * always run when A2DP connects: the system doesn't start a killed process again while the device
+ * stays present. When both apply it, the second request resolves ALREADY_PENDING, or verifies the
+ * codec that is already active.
  */
 class A2dpConnectReceiver : BroadcastReceiver() {
     companion object {

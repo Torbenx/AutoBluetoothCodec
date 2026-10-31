@@ -5,11 +5,12 @@
     <!-- Up to API 30 the A2DP profile calls are guarded by the legacy BLUETOOTH permission -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-    <!-- Since API 31 the system binds CodecCompanionService while an associated device is present -->
+    <!-- Since API 33 the system binds CodecCompanionService while an associated device is present -->
     <uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE"/>
 
-    <!-- Since API 31 needed to apply the preferred codec when a device appears, since API 34 also to
-         change the codec. Without it only A2dpConnectReceiver applies the preferred codec. -->
+    <!-- Since API 31 a link exempts the app from losing its permission while unused, since API 33 it
+         lets CodecCompanionService apply the preferred codec when a device appears, and since API 34
+         it's needed to change the codec. Without it only A2dpConnectReceiver applies the preferred codec. -->
     <uses-feature android:name="android.software.companion_device_setup" android:required="false"/>
 
     <application
@@ -52,11 +53,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Only enabled since API 33: on API 31 and 32 the system unbinds it before A2DP connects,
+             and forgets at every reboot that the app observes a device -->
         <service
             android:name=".CodecCompanionService"
+            android:enabled="@bool/companion_service_enabled"
             android:exported="true"
+            android:directBootAware="true"
             android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE"
-            tools:targetApi="31">
+            tools:targetApi="33">
             <intent-filter>
                 <action android:name="android.companion.CompanionDeviceService"/>
             </intent-filter>
@@ -64,7 +69,8 @@
         <!-- Enabled on every API level, it also covers A2DP connecting while CodecCompanionService doesn't run -->
         <receiver
             android:name=".A2dpConnectReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:directBootAware="true">
             <intent-filter>
                 <action android:name="android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED"/>
             </intent-filter>

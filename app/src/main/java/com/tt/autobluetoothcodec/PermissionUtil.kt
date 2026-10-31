@@ -96,11 +96,21 @@ object PermissionUtil {
     }
 
     /**
-     * Since API 31 the preferred codec is applied by [CodecCompanionService] when a device appears,
-     * which the system only does for associated devices. [A2dpConnectReceiver] applies it when A2DP
-     * connects, with or without an association.
+     * Whether [device] has to be linked so its preferred codec keeps being applied when it connects.
+     * [A2dpConnectReceiver] applies it with or without an association.
+     *
+     * Since API 33 [CodecCompanionService] applies it as well while the device is present, which the
+     * system only reports for associated devices. On API 31 and 32 the service is disabled, but the
+     * system revokes the Bluetooth permission of an app that isn't used for a few months, which stops
+     * the receiver. Any association exempts the app from that, and unlinking keeps the exemption, so a
+     * link is only needed while the app isn't exempt and no device is linked. With a device linked, the
+     * user turned the exemption off in the app's settings, and linking again wouldn't change it.
      */
     fun isAssociationRequiredForAutoApply(context: Context, device: BluetoothDevice): Boolean {
-        return canAssociate(context) && !hasAssociation(context, device)
+        if (Build.VERSION.SDK_INT < 31 || !canAssociate(context))
+            return false
+        if (Build.VERSION.SDK_INT >= 33)
+            return !hasAssociation(context, device)
+        return !context.packageManager.isAutoRevokeWhitelisted && getAssociatedAddresses(context).isEmpty()
     }
 }

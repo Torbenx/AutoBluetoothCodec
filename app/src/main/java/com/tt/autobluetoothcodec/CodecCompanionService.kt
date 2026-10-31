@@ -18,10 +18,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 
 /**
- * Applies the preferred codec of observed devices, see [CompanionPresence]. Since API 33 the system
- * keeps this service bound while such a device is present, which keeps the process out of the
- * background. On API 31 and 32 it only binds it for the callbacks. [A2dpConnectReceiver] applies
- * the preferred codec when A2DP connects too, for when the service doesn't run.
+ * Applies the preferred codec of observed devices, see [CompanionPresence]. The system keeps this
+ * service bound while such a device is present, which keeps the process out of the background. It's
+ * disabled before API 33, where the system only binds it for the callbacks. [A2dpConnectReceiver]
+ * applies the preferred codec when A2DP connects too, for when the service doesn't run.
  *
  * A device appears as soon as its Bluetooth link connects, usually before A2DP is connected. So
  * while a device is present, a runtime receiver waits for A2DP to connect. Unlike the manifest
@@ -33,7 +33,7 @@ import androidx.core.content.IntentCompat
  * stays. So there the service follows [onDevicePresenceEvent] instead, and a device is present while
  * any source reports it.
  */
-@RequiresApi(31)
+@RequiresApi(33)
 class CodecCompanionService : CompanionDeviceService() {
     companion object {
         private const val TAG = "CodecCompanionService"

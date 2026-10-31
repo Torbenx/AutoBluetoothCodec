@@ -23,7 +23,8 @@ import org.robolectric.shadow.api.Shadow
 
 /**
  * K6 of the test concept: which API levels and phones link devices and observe their presence,
- * and that the manifest receiver is enabled on all of them. Each test runs on every SDK level in its @Config.
+ * that the manifest receiver is enabled on all of them and the companion service since API 33.
+ * Each test runs on every SDK level in its @Config.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(shadows = [ObservingCompanionDeviceManager::class])
@@ -43,7 +44,21 @@ class CompanionPresenceTest {
         context.getSystemService(CompanionDeviceManager::class.java))
 
     /** Links the device like the companion device manager stores it, in lower case since API 33. */
-    private fun link() = companionManager.addAssociation(if (sdk >= 33) ADDRESS.lowercase() else ADDRESS)
+    private fun link(address: String = ADDRESS) = companionManager.addAssociation(if (sdk >= 33) address.lowercase() else address)
+
+    /**
+     * Links the device through the system's dialog. Unlike [link], which only stores the association,
+     * this also exempts the app from losing its permissions while unused, like the system does.
+     */
+    private fun linkLikeTheSystem(address: String = ADDRESS) {
+        link(address)
+        setAutoRevokeExempt(true)
+    }
+
+    private fun setAutoRevokeExempt(exempt: Boolean) = shadowOf(context.packageManager).setAutoRevokeWhitelisted(exempt)
+
+    private fun autoApplyNeedsLink(address: String = ADDRESS) =
+        PermissionUtil.isAssociationRequiredForAutoApply(context, device(address))
 
     private val receiverState get() = context.packageManager.getComponentEnabledSetting(
         ComponentName(context, A2dpConnectReceiver::class.java))
@@ -78,7 +93,56 @@ class CompanionPresenceTest {
     }
 
     @Test
-    @Config(sdk = [31, 33, 34, 36])
+    @Config(sdk = [31, 32])
+    fun aLinkIsOnlyRequiredOnceOn31And32() {
+        assertTrue(autoApplyNeedsLink())
+        assertTrue(autoApplyNeedsLink(OTHER_ADDRESS))
+        linkLikeTheSystem()
+        // The link is only for the exemption, which covers every device
+        assertFalse(autoApplyNeedsLink(OTHER_ADDRESS))
+        // Unlinking keeps the exemption
+        assertTrue(PermissionUtil.removeAssociation(context, device()))
+        assertFalse(autoApplyNeedsLink())
+        assertFalse(autoApplyNeedsLink(OTHER_ADDRESS))
+    }
+
+    @Test
+    @Config(sdk = [31, 32])
+    fun anExemptAppNeedsNoLinkOn31And32() {
+        // Like after the user turned off removing the permissions of the unused app
+        setAutoRevokeExempt(true)
+        assertFalse(autoApplyNeedsLink())
+        assertFalse(PermissionUtil.hasAssociation(context, device()))
+    }
+
+    @Test
+    @Config(sdk = [31, 32])
+    fun aLinkedDeviceIsEnoughWithoutTheExemptionOn31And32() {
+        // The user turned removing the permissions back on after linking, linking again wouldn't change it
+        linkLikeTheSystem()
+        setAutoRevokeExempt(false)
+        assertFalse(autoApplyNeedsLink(OTHER_ADDRESS))
+    }
+
+    @Test
+    @Config(sdk = [33, 34, 36])
+    fun everyDeviceNeedsItsOwnLinkSince33() {
+        linkLikeTheSystem()
+        assertFalse(autoApplyNeedsLink())
+        // The companion service is only told about linked devices
+        assertTrue(autoApplyNeedsLink(OTHER_ADDRESS))
+    }
+
+    @Test
+    @Config(sdk = [28, 31, 32, 33, 36])
+    fun theCompanionServiceIsEnabledSince33() {
+        val service = ComponentName(context, CodecCompanionService::class.java)
+        val info = context.packageManager.getServiceInfo(service, PackageManager.MATCH_DISABLED_COMPONENTS)
+        assertEquals(sdk >= 33, info.enabled)
+    }
+
+    @Test
+    @Config(sdk = [33, 34, 36])
     fun observesWhileLinkedWithAPreferredCodec() {
         link()
         CompanionPresence.update(context, device())
@@ -97,8 +161,8 @@ class CompanionPresenceTest {
     }
 
     @Test
-    @Config(sdk = [28])
-    fun nothingIsObservedBefore31() {
+    @Config(sdk = [28, 31, 32])
+    fun nothingIsObservedBefore33() {
         link()
         PreferredCodecStore.set(context, device(), sbc())
         CompanionPresence.update(context, device())
@@ -108,7 +172,7 @@ class CompanionPresenceTest {
     }
 
     @Test
-    @Config(sdk = [31, 36])
+    @Config(sdk = [33, 36])
     fun syncAllRepairsObservingWithoutLogging() {
         link()
         PreferredCodecStore.set(context, device(), sbc())
@@ -138,9 +202,15 @@ class CompanionPresenceTest {
     fun addressesAreMatchedIgnoringCase() {
         companionManager.addAssociation(ADDRESS.lowercase())
         assertTrue(PermissionUtil.hasAssociation(context, device()))
+        // Passed back unchanged, the manager compares the strings exactly before API 33
+        assertEquals(listOf(ADDRESS.lowercase()), PermissionUtil.findAssociatedAddresses(context, device()))
         PreferredCodecStore.set(context, device(), sbc())
         CompanionPresence.update(context, device())
-        // Passed back unchanged, the manager compares the strings exactly before API 33
-        assertEquals(setOf(ADDRESS.lowercase()), companionManager.observed)
+        if (sdk >= 33)
+            assertEquals(setOf(ADDRESS.lowercase()), companionManager.observed)
+    }
+
+    private companion object {
+        const val OTHER_ADDRESS = "00:11:22:33:44:66"
     }
 }

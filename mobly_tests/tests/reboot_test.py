@@ -1,13 +1,12 @@
 """L4 tests that reboot the phone: C7 without a lock screen, C14 and C15 with a secure lock screen that is
 still locked when A2DP connects.
 
-Before the first unlock after a boot, the app's storage is encrypted and the
-system doesn't start it: neither its manifest receiver nor its companion
-service, which don't run before the unlock. What happens to the codec and to
-the companion device manager then was analysed from the AOSP sources per API
-level ("Codec After Locked Reboot"): nothing applies the preferred codec after
-the unlock, and on API 31 to 33 the system doesn't find the companion service
-for the rest of that boot. C14 and C15 fail until the app handles it.
+Before the first unlock after a boot, the app's credential protected storage
+is encrypted. Its manifest receiver and companion service are direct boot
+aware, so the system starts them anyway: the receiver applies the preferred
+codec when A2DP connects, and the log keeps the events in a device protected
+file until the unlock merges them. What happens per API level is in
+TestConcept.md, below the C14 and C15 rows.
 
 Which phones are rebooted depends on their lock screen (D24): a pure test
 device gets the PIN 0000 for the locked reboot and loses it again, a
@@ -114,9 +113,11 @@ class RebootTest(ColdStartBase):
     def reset_phone(self):
         """Clears the PIN and, after a locked reboot, reboots again with Bluetooth off (D26).
 
-        On API 31 to 33, and on 34 after a BLE sighting, the system keeps the
-        companion service it didn't find before the unlock until the next
-        reboot. With Bluetooth off nothing appears before the unlock.
+        Before the companion service was direct boot aware, the system kept
+        not finding it until the next reboot on API 31 to 33, and on 34 after a
+        BLE sighting. The clean reboot keeps the next test independent of what
+        the locked boot left. With Bluetooth off nothing appears before the
+        unlock.
         """
         if self._unlock_failed:
             asserts.abort_all(f"{self.ad.serial} is still locked")
@@ -156,8 +157,8 @@ class RebootTest(ColdStartBase):
         """After a reboot with a secure lock screen, A2DP connects before the first unlock: applied after
         the unlock, without another connect.
 
-        Fails today on every API level: the A2DP broadcast reaches no receiver
-        of the app before the unlock, and nothing applies the codec after it.
+        The manifest receiver applies it before the unlock. The log is only read
+        after it, so this also checks that the locked events are merged.
         """
         self.require_lock_screen()
         codec = self.preferred_codec()
@@ -170,20 +171,19 @@ class RebootTest(ColdStartBase):
         """After the same locked reboot, the system reports the device to the companion service: after
         the unlock, since it's connected, and again when it next connects.
 
-        Fails today on API 31 to 33: the system looked the service up while
-        the user was locked and found nothing. On 31 and 32 it keeps that
-        until the next reboot, on 33 until a package changes. On 34 the same
-        happens after a BLE sighting before the unlock. Since API 35 it holds
-        the presence events back and reports them at the unlock.
+        The service is direct boot aware, so the system finds it while the user
+        is locked. Up to API 34 it reports the device as soon as it sees it,
+        since API 35 it holds the presence events back and reports them at the
+        unlock.
         """
         self.require_lock_screen()
-        self.require(self.sdk >= 31, "presence is only observed since API 31")
+        self.require(self.sdk >= 33, "presence is only observed since API 33")
         codec = self.preferred_codec()
         mark = self.reboot_locked(codec)
         self.unlock()
         after_unlock = self.appearance(mark, UNLOCK_APPEARANCE_TIMEOUT)
         self.headset_off()
-        # Gone for the system too: on API 32 a device counts as gone 7 to 8 s after its BLE advertisements stop
+        # Gone for the system too: a device counts as gone some seconds after its BLE advertisements stop
         time.sleep(15)
         mark = self.log.last_seq()
         self.headset_on()

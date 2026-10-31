@@ -215,6 +215,25 @@ class InstrumentationTest(unittest.TestCase):
                          app.parse_instrumentation(output))
 
 
+class AutoRevokeTest(unittest.TestCase):
+    """`appops get com.tt.autobluetoothcodec AUTO_REVOKE_PERMISSIONS_IF_UNUSED`, on API 32 unless noted."""
+
+    def test_linked(self):
+        self.assertEqual("ignore", app.parse_auto_revoke_mode("AUTO_REVOKE_PERMISSIONS_IF_UNUSED: ignore\n"))
+
+    def test_theUsersChoiceWins(self):
+        allow = "Uid mode: AUTO_REVOKE_PERMISSIONS_IF_UNUSED: allow\nAUTO_REVOKE_PERMISSIONS_IF_UNUSED: ignore\n"
+        self.assertEqual("allow", app.parse_auto_revoke_mode(allow))
+        ignore = "Uid mode: AUTO_REVOKE_PERMISSIONS_IF_UNUSED: ignore\nAUTO_REVOKE_PERMISSIONS_IF_UNUSED: ignore\n"
+        self.assertEqual("ignore", app.parse_auto_revoke_mode(ignore))
+
+    def test_neverSet(self):
+        self.assertEqual("default", app.parse_auto_revoke_mode("No operations.\nDefault mode: default\n"))
+
+    def test_api28HasNoSuchOp(self):
+        self.assertIsNone(app.parse_auto_revoke_mode("Error: Unknown operation string: AUTO_REVOKE_PERMISSIONS_IF_UNUSED\n"))
+
+
 class NotRunTest(unittest.TestCase):
     def record(self, signal):
         record = records.TestResultRecord("test_x", "ColdStartTest")

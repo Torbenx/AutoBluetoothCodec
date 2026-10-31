@@ -165,9 +165,9 @@ class Baseline:
         """
         adb = self.adb
         # Relinking first ends observing; any event it causes is deleted with the app data next.
-        # API 31 and 32 don't show observing, so they're always relinked.
+        # API 31 and 32 don't show observing, but the app doesn't observe there.
         linked = companion.is_linked(adb, app.PACKAGE, self.headset.address)
-        if not linked or self.sdk in (31, 32) or companion.is_observing(adb, app.PACKAGE, self.headset.address):
+        if not linked or companion.is_observing(adb, app.PACKAGE, self.headset.address):
             if linked:
                 companion.unlink(adb, app.PACKAGE, self.headset.address)
             companion.link(adb, app.PACKAGE, self.headset.address)

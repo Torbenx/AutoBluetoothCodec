@@ -2,7 +2,7 @@
 
 How Auto Bluetooth Codec is tested: which test levels exist, what each one
 covers, which information and control channels they use, what the harness
-needs, and in which order it's built. The decisions behind it, D1 to D26, are
+needs, and in which order it's built. The decisions behind it, D1 to D27, are
 listed in [section 13](#13-decisions) and referenced where they matter.
 
 Two manual test records, `tools/codec-applier-tests.md` and
@@ -90,12 +90,13 @@ with the phone's lock screen is a capability:
 
 | Path | API 28 Pixel | API 32 Pixel | API 33 | API 34–35 | API 36 S24 | 31+ without companion feature |
 | --- | --- | --- | --- | --- | --- | --- |
-| Applies on connect | `A2dpConnectReceiver` | `CodecCompanionService` when A2DP connects while the device is present, observed by address; `A2dpConnectReceiver` too | `CodecCompanionService`, by address | by address | by association id | `A2dpConnectReceiver`, enabled at runtime |
+| Applies on connect | `A2dpConnectReceiver` | `A2dpConnectReceiver`; `CodecCompanionService` disabled (D27) | `CodecCompanionService` when A2DP connects while the device is present, observed by address; `A2dpConnectReceiver` too | by address | by association id | `A2dpConnectReceiver` |
+| Link asked for | – | Only while the app has no link and isn't exempt from losing its permission when unused (D27) | per device | per device | per device | – |
 | Codec classes | reflection | reflection | public | public | public | – |
 | Runtime permission | – | yes | yes | yes | yes | yes |
 | Association needed to change the codec | no | no | no | yes | yes | – |
 | Association needed to read the codec | no | no | no | no | yes | – |
-| Presence comes from | – | BLE scans (seen in Logcat) | ? | ? | appears before A2DP (manual test 2.1) | – |
+| Presence comes from | – | not observed (D27) | ? | ? | appears before A2DP (manual test 2.1) | – |
 
 Gaps no phone covers: API 33, API 34–35 (the only versions where the codec
 can be read but not changed without a link, so the card shows the codec and
@@ -262,7 +263,7 @@ levels and fakes that a phone can't provide.
 | K3 | `CodecApplier` proxy lifecycle: requested once, closed on disconnect, requested again by the next request (manual 2.3) | P2 |
 | K4 | `A2dpConnectReceiver`: ignores other actions, states and devices without a preferred codec; deadline resolves `TIMEOUT`; an exception resolves `ERROR`; the broadcast finishes once, after the flush | P1 |
 | K5 | `CodecCompanionService`: no preferred codec registers no receiver; appearing registers the receiver once and applies nothing, even with A2DP connected (D23); A2DP connecting applies only for present devices; disappearing cancels; `onDestroy` unregisters; a restarted service knows no present devices (see C3); since API 36 a device is present while any source reports it (D18) | P1 |
-| K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 33, 34, 36, with and without the companion feature: observing by address and by id, `syncAll` repairs, the receiver enabled on every level, `isAssociationRequired(ForAutoApply)`, address case | P1 |
+| K6 | `CompanionPresence` and `PermissionUtil` on SDK 28, 31, 32, 33, 34, 36, with and without the companion feature: observing by address and by id since 33 and nothing before, `syncAll` repairs, the receiver enabled on every level and the service since 33, `isAssociationRequired(ForAutoApply)`, on 31–32 a link only while the app has none and isn't exempt from auto revoke, address case | P1 |
 | K7 | `EventLog`: structure violations throw in debuggable builds, append and rewrite at 2 × `MAX_EVENTS`, repair with `OPERATION_INTERRUPTED` on load, `clear` keeps open operations, `flush` order, partial lines; disabling deletes the log, stays disabled after a restart and keeps operations that span it out of the log; loading on the background thread: `events` is null until loaded, events logged meanwhile follow the loaded ones, numbered on, `clear` and disabling meanwhile apply to the loaded events, `awaitWritten` waits for the thread | P1 |
 | K8 | `PreferredCodecStore`: invalid JSON reads as none, address case | P3 |
 | K9 | Direct boot: while the user is locked the log appends to its device protected file and can't be read; unlocking merges those events after the old ones, numbered on, also when reading notices the unlock, also across locked restarts; the unlock broadcast merges them without another event or read, its receiver is only registered while locked and unregistered once the load is queued; the device protected file stays until the merged log is written; operations left open by an earlier process are interrupted, those of this process continue; trimming and partial lines; disabled logging and the preferred codecs are known while locked | P1 |
@@ -311,7 +312,7 @@ unless a test says otherwise.
 | B7 | The phone's Bluetooth off resolves `PROFILE_UNAVAILABLE`; off during a request `PROFILE_DISCONNECTED`, or `NOT_CONNECTED` when the device's connection goes before the profile, which the S24 does in some runs; back on, the next request opens a new proxy and verifies (manual 2.3) | all | | P2 |
 | B8 | Links, with the main screen open. Without a link: up to 33 reading and changing work; on 34–35 changing resolves `NO_ASSOCIATION`; on 36 the codec is also unreadable, and the screen logs `READ_FAILED` once. With a link everything works | all | | P1 |
 | B9 | Observing: on with a preferred codec, off when it's deleted, and after clearing app data the next start turns it off (whether the link stays is recorded, 6.7). API 31–32 show observing nowhere, C1 and C3 depend on it there | 33+ | | P2 |
-| B10 | A device disappearing during a request resolves `CANCELLED` | 31+ | power switch | P3 |
+| B10 | A device disappearing during a request resolves `CANCELLED` | 33+ | power switch | P3 |
 | B11 | A codec set bypassing the applier, with the main screen open, is logged once as `ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE`; the app's own changes never are (manual 2.2) | all | | P2 |
 | B12 | A request while the service or receiver applies the preferred codec on connect supersedes it, and the requested codec wins. The preferred codec is one the headset doesn't offer, which keeps the background operation open for its 5 attempts; B7 and C4 use the same trick | all | | P2 |
 
@@ -323,11 +324,11 @@ does, never launched, force-stopped, after a reboot or after an update.
 
 | ID | Test | Runs on | Needs | Prio |
 | --- | --- | --- | --- | --- |
-| C1 | App process killed, the headset reconnects: the preferred codec is applied, by the service from 31 and by the manifest receiver on every level (D17) | all | | P1 |
+| C1 | App process killed, the headset reconnects: the preferred codec is applied, by the service from 33 and by the manifest receiver on every level (D17) | all | | P1 |
 | C2 | The same with the app in the foreground and in the background but alive (manual 2.1) | all | | P1 |
-| C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 31+ | A2DP switch | P1 |
+| C3 | App process killed while the device is present but A2DP is down, then A2DP connects: records whether the codec is applied. The service keeps the present devices in memory, and the system may restart it without calling `onDeviceAppeared` again. Characterization (D8) | 33+ | A2DP switch | P1 |
 | C4 | Process killed during an operation: the next start resolves it `OPERATION_INTERRUPTED`, nothing stays unresolved | all | | P2 |
-| C5 | Permission revoked, the device connects: its appearance is logged, nothing is applied, anything that tries resolves `NO_PERMISSION`, no crash (D23) | 31+ | | P2 |
+| C5 | Permission revoked, the device connects: its appearance is logged since 33, nothing is applied, anything that tries resolves `NO_PERMISSION`, no crash (D23) | 31+ | | P2 |
 | C6 | No preferred codec: the codec isn't touched and nothing is logged; the manifest receiver starts the process and returns | all | | P2 |
 | C7 | After a reboot, without opening the app: applied | all | no lock screen | P2 |
 | C8 | After an update (`install -r`), without opening the app: applied | all | | P2 |
@@ -335,8 +336,8 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C10 | The phone's Bluetooth turned off and on while the app is dead, then the device connects: applied | all | | P3 |
 | C11 | 20 reconnects in a row: every one verified, time to verified recorded | all | | P3 |
 | C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
-| C14 | After a reboot with a secure lock screen, A2DP connects before the first unlock: applied within 60 s of the unlock, without another connect; the time is recorded. Fails today | all | a lock screen the suite can unlock | P1 |
-| C15 | After the same reboot, the system reports the device to the companion service: after the unlock, and when it next connects. Fails today on API 31–33 | 31+ | a lock screen the suite can unlock | P1 |
+| C14 | After a reboot with a secure lock screen, A2DP connects before the first unlock: applied within 60 s of the unlock, without another connect; the time is recorded | all | a lock screen the suite can unlock | P1 |
+| C15 | After the same reboot, the system reports the device to the companion service: after the unlock, and when it next connects | 33+ | a lock screen the suite can unlock | P1 |
 
 C7, C14 and C15 are in `tests/reboot_test.py`, which runs last (6.9). C14
 and C15 check that the scenario happened: the user is still `RUNNING_LOCKED`
@@ -344,23 +345,30 @@ and C15 check that the scenario happened: the user is still `RUNNING_LOCKED`
 connect before the unlock, they reconnect the headset once; the connect
 fixture's last resort, the Bluetooth settings, is behind the lock screen.
 
-Before the first unlock the app's storage is encrypted, and its receiver and
-companion service, which can't run before the unlock, aren't started. From
-the AOSP sources, per API level:
+Before the first unlock the app's credential protected storage is
+encrypted. The manifest receiver and the companion service are direct boot
+aware, so the system starts them anyway; the preferred codecs are in device
+protected storage, and the log keeps its events in a device protected file
+until the unlock merges them (K9). Per API level, from the AOSP sources and
+the runs on the testbed:
 
 | API | Before the unlock | At the unlock | C14 | C15 |
 | --- | --- | --- | --- | --- |
-| 28–30 | Receiver skipped | Nothing | fails | – |
-| 31–32 | Receiver skipped; the companion device manager caches a no-op for the service | Nothing; the service can't be bound until the next reboot | fails | fails |
-| 33 | Receiver skipped; the manager's service cache is built without the app | Nothing; the device already counts as present | fails | fails, until some package changes |
-| 34 | Receiver skipped; Bluetooth connects held back, BLE sightings not | Without a BLE sighting: the service is bound, too late to apply. With one: like 33 | fails | passes or fails |
-| 35–36 | Receiver skipped; all presence events held back | Replayed: the service is bound, too late to apply | fails | passes |
+| 28–32 | The receiver applies the codec when A2DP connects | The log merges the locked events | passes (28, 32) | – (no service before 33, D27) |
+| 33–34 | The receiver applies it; the service is found while locked and told when the device appears | – | not on the testbed | not on the testbed |
+| 35–36 | The receiver applies it; all presence events held back | Replayed: the service is bound | passes (36) | passes (36) |
 
-The fix C14 waits for is a `BOOT_COMPLETED` receiver: the broadcast is sent
-after the first unlock. It doesn't repair the companion device manager on
-31–33, so C15 keeps failing there. Unless the app is made to run before the
-unlock, which avoids the broken lookups, C15 becomes a characterization test
-(D8) once the fix is decided.
+Without direct boot awareness, the manager looked the service up while the
+user was locked and kept the empty result on API 31–33, and nothing applied
+the codec after the unlock.
+
+On the S24, Samsung's freezer freezes the app's process about 3 s after it
+starts in the background, even while the companion device manager has the
+service bound, until a broadcast or a new binding thaws it. When the process
+only started at the unlock, it was frozen before it handled the replayed
+presence event, and C15 missed the appearance by a second. Since the
+receiver runs before the unlock, the process is usually ready at the unlock
+and handles the event in time.
 
 ### L5 Journeys
 
@@ -371,12 +379,13 @@ check that the parts work together, not every detail on the way.
 | --- | --- | --- | --- |
 | J1 | First start: grant the permission in the system dialog, the card shows the codec `dumpsys` reports. Denying twice shows the settings hint | 31+ | P2 |
 | J2 | Choose codecs with the chips: `dumpsys`, the card and the log agree (manual 1.1) | all | P1 |
-| J3 | Save as preferred; from 31 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
+| J3 | Save as preferred; on 33–35 the device starts unlinked, so the companion dialog appears and is accepted; the chip says "Preferred Codec"; after a reconnect the preferred codec is active and shown | all | P1 |
 | J4 | A codec change by another app shows on the card within 2 s; Restore Preferred Codec brings it back (manual 1.2, 2.2). The snippet's `setCodecDirectly` makes the change, the same call the developer options make: their screens differ too much between the phones, and the API 28 Pixel doesn't open them from their intent | all | P2 |
 | J5 | Delete the preferred codec: after a reconnect the codec is left alone and the menu is gone (debug builds keep it for Unlink where the device is linked) | all | P2 |
 | J6 | An unlinked device asks to be linked (on 36 because its codec is unreadable, on 34–35 once it has a preferred codec); Allow and the dialog make its codec appear and changeable | 34+ | P1 |
 | J7 | Rotating while a codec is applied: no crash, verified (manual 1.6) | all | P2 |
 | J8 | The log screen shows a real reconnect with its attempts; the anonymised export contains no addresses or names (log 2.5) | all | P2 |
+| J9 | On 31–32, unlinked and not exempt from auto revoke (`appops`), saving asks for the link and the dialog is accepted: `AUTO_REVOKE_PERMISSIONS_IF_UNUSED` is `ignore`. After unlinking it stays `ignore`, and saving again asks for no link (D27) | 31–32 | P1 |
 
 ## 5. Where journeys are worth it
 
@@ -443,7 +452,7 @@ hasn't saved a preferred codec:
 | App data | Log empty, all settings at their defaults, so no preferred codecs | `run-as` listing `files/` and `shared_prefs/` | Resetting the app data, see below |
 | Package | Not stopped, so manifest receivers get broadcasts | `dumpsys package` | A broadcast to `TestLabelReceiver` without a label |
 | Nearby devices permission (31+) | Granted, not marked user-set or user-fixed | `dumpsys package` | `pm grant` after the reset, which clears the flags |
-| Link | The headset is linked on every phone, also where the app doesn't need it; nothing is observed | `cmd companiondevice list`; observing from `dumpsys companiondevice` on 33+. API 31–32 show observing nowhere, not even in the system's file | `cmd companiondevice disassociate` and `associate`, which also ends observing. On 31–32 always, since it can't be checked |
+| Link | The headset is linked on every phone, also where the app doesn't need it; nothing is observed | `cmd companiondevice list`; observing from `dumpsys companiondevice` on 33+. API 31–32 show observing nowhere, not even in the system's file | `cmd companiondevice disassociate` and `associate`, which also ends observing. The app doesn't observe on 31–32 (D27) |
 | Phone Bluetooth | On; every other phone on adb off | `device_state` | `device_state.set_bluetooth` |
 | A2DP | The headset is connected and the active device | `bt_oracle` | The connect fixture, [6.6](#66-connecting-the-headset) |
 | Headset | Its normal state (Qudelix: `normal`) | The backend | The backend |
@@ -862,8 +871,9 @@ needs the ones before it unless it says otherwise.
     `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is not applicable for its API level or
     headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
-13. **Locked reboot**: the lock screen classes (D24–D26), C14 and C15, which
-    fail until the app applies the preferred codec after the first unlock.
+13. **Locked reboot**: the lock screen classes (D24–D26), C14 and C15. Both
+    pass where they apply since the receiver and the service are direct boot
+    aware.
 14. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
     test once R8 is enabled.
 
@@ -1052,6 +1062,18 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   manifest receiver applied the codec. C7 passed after each clean reboot,
   and no test left the baseline broken. On Android 9 the Gatekeeper SID in
   `dumpsys lock_settings` tells whether the PIN is set.
+- The reboot tests with the receiver and the companion service direct boot
+  aware: C14 passed on all three phones, the receiver applied the codec
+  before the unlock and the merged log had it. C15 passed on the S24 and
+  failed on API 32 without any appearance: Android 12 and 12L only write
+  whether a device is observed (`notify_device_nearby`) for associations
+  with a device profile, so every reboot forgets it; the stored association
+  had no such attribute. Observing again at `LOCKED_BOOT_COMPLETED` came too
+  late: in a boot recorded from the start, the manager logged
+  `onDeviceConnected` 0.4 s before the broadcast was sent, and reported the
+  device only after it had gone and come back. Mobly's logcat misses the
+  start of a boot, the Pixel's buffer is overwritten by then. This led to
+  D27.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
@@ -1159,3 +1181,15 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   so the suite needs no command for that. Their `locksettings set-disabled`
   at boot counts as a failed attempt on Android 9 and 12L while the PIN is
   set; the unlock right after resets the count.
+- **D27** On API 31 and 32 the companion service is disabled and nothing is
+  observed: the system unbinds the service right after reporting a device,
+  before A2DP connects, so it applies nothing the manifest receiver doesn't,
+  and it forgets observing at every reboot, which only a boot receiver could
+  repair, and those are unreliable on some OEMs. A link is still asked for
+  there, for its side effect: it sets `AUTO_REVOKE_PERMISSIONS_IF_UNUSED` to
+  `ignore`, so the system doesn't revoke the Nearby devices permission of an
+  unused app. Unlinking keeps that, so a link is only asked for while the
+  app has none and `isAutoRevokeWhitelisted` is false; with a link, the user
+  turned the exemption off in the app's settings, and linking again wouldn't
+  change it. API 30 has auto revoke too, but the app has no runtime
+  permission there.

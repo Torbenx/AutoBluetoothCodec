@@ -88,9 +88,9 @@ class JourneyTest(BaselineTest):
 
     def test_j3_save_as_preferred_and_reconnect(self):
         """Saving the codec as preferred, linking where needed; after a reconnect it's applied and shown."""
-        # Since API 31 saving links the device. On API 36 an unlinked device's codec is unreadable,
-        # so there is nothing to save; J6 covers that.
-        linking = 31 <= self.sdk < 36
+        # Since API 33 saving links the device, on 31 and 32 only an app without any link, J9. On API
+        # 36 an unlinked device's codec is unreadable, so there is nothing to save; J6 covers that.
+        linking = 33 <= self.sdk < 36
         if linking:
             companion.unlink(self.adb, app.PACKAGE, self.address)
         screen = self.main_screen()
@@ -129,6 +129,35 @@ class JourneyTest(BaselineTest):
         asserts.assert_equal("ASSOCIATION_CREATED", op.resolution, str(op))
         asserts.assert_true(screen.shows("LDAC", "96000 Hz"), "the codec doesn't show after linking")
         self.choose(screen, "SBC", SBC_44_16)
+
+    def test_j9_a_link_is_asked_for_once_on_api_31_and_32(self):
+        """On API 31 and 32 saving asks for a link only while the app has none and isn't exempt from losing
+        its permission when unused. The link exempts it; after unlinking, saving doesn't ask again."""
+        self.require(31 <= self.sdk <= 32, "only API 31 and 32 link for the exemption")
+        # A fresh install that was never linked; the baseline links again afterwards
+        companion.unlink(self.adb, app.PACKAGE, self.address)
+        app.reset_auto_revoke(self.adb)
+        screen = self.main_screen()
+        self.choose(screen, "SBC", SBC_44_16)
+        mark = self.log.last_seq()
+        screen.tap_status()
+        screen.accept_link_dialog()
+        op = self.log.wait_for_operation(after=mark, trigger="USER_SAVE_PREFERRED", device=self.address, timeout=30)
+        asserts.assert_equal("PREFERRED_SAVED", op.resolution, str(op))
+        asserts.assert_true(op.of_type("ASSOCIATION_REQUESTED"), f"saving didn't ask for the link: {op}")
+        asserts.assert_true(companion.is_linked(self.adb, app.PACKAGE, self.address), "the device isn't linked")
+        asserts.assert_equal("ignore", app.auto_revoke_mode(self.adb), "linking didn't exempt the app")
+
+        companion.unlink(self.adb, app.PACKAGE, self.address)
+        asserts.assert_equal("ignore", app.auto_revoke_mode(self.adb), "unlinking ended the exemption")
+        screen.tap_menu_item("delete_preferred")
+        asserts.assert_equal("Save As Preferred Codec", screen.status(), "the status chip after deleting")
+        mark = self.log.last_seq()
+        screen.tap_status()
+        op = self.log.wait_for_operation(after=mark, trigger="USER_SAVE_PREFERRED", device=self.address, timeout=30)
+        asserts.assert_equal("PREFERRED_SAVED", op.resolution, str(op))
+        asserts.assert_false(op.of_type("ASSOCIATION_REQUESTED"), f"saving asked for the link again: {op}")
+        asserts.assert_false(companion.is_linked(self.adb, app.PACKAGE, self.address), "the device was linked again")
 
     def test_j1_first_start(self):
         """First start: the permission is granted in the system's dialog, and the card shows the codec
