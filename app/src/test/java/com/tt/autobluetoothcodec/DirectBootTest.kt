@@ -1,14 +1,18 @@
 package com.tt.autobluetoothcodec
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.util.AtomicFile
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.tt.autobluetoothcodec.TestSupport.ADDRESS
 import com.tt.autobluetoothcodec.TestSupport.context
 import com.tt.autobluetoothcodec.TestSupport.device
 import com.tt.autobluetoothcodec.TestSupport.flushLog
+import com.tt.autobluetoothcodec.TestSupport.runPending
 import com.tt.autobluetoothcodec.TestSupport.sbc
 import com.tt.autobluetoothcodec.TestSupport.setUserUnlocked
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,7 +23,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
 /**
  * K9 of the test concept: the log and the settings before the user unlocks the phone after a
@@ -60,6 +67,9 @@ class DirectBootTest {
 
     private fun event(seq: Long, type: EventType, opUID: String? = null, message: String? = null) =
         LogEvent(LogEvent.VERSION, seq, 1000 * seq, type, opUID = opUID, device = LogDevice(ADDRESS), message = message)
+
+    private fun unlockReceivers() =
+        shadowOf(context).registeredReceivers.count { it.intentFilter.hasAction(Intent.ACTION_USER_UNLOCKED) }
 
     /** Asserts that the events are numbered without gaps, from [first] on. */
     private fun assertSequence(events: List<LogEvent>, first: Long = 0) {
@@ -134,6 +144,59 @@ class DirectBootTest {
         flushLog()
         assertFalse(dpsFile.exists())
         assertEquals(1, lines(upsFile).size)
+    }
+
+    @Test
+    fun theUnlockBroadcastMergesTheLockedEvents() {
+        writeUps(event(0, EventType.TEST_LABEL, message = "old"))
+        restartLocked()
+        log.log(EventType.TEST_LABEL, message = "a")
+        assertEquals(1, unlockReceivers())
+        setUserUnlocked(true)
+        context.sendBroadcast(Intent(Intent.ACTION_USER_UNLOCKED))
+        runPending()
+        assertEquals(0, unlockReceivers())
+        // Merged without another event or read
+        assertEquals(listOf("old", "a"), EventLog.parse(lines(upsFile)).map { it.message })
+        assertFalse(dpsFile.exists())
+    }
+
+    @Test
+    fun anEventThatNoticesTheUnlockUnregistersTheReceiver() {
+        restartLocked()
+        log.log(EventType.TEST_LABEL, message = "a")
+        assertEquals(1, unlockReceivers())
+        setUserUnlocked(true)
+        log.log(EventType.TEST_LABEL, message = "b")
+        assertEquals(0, unlockReceivers())
+    }
+
+    @Test
+    fun noUnlockReceiverWhileUnlocked() {
+        log.log(EventType.TEST_LABEL, message = "a")
+        assertEquals(0, unlockReceivers())
+    }
+
+    @Test
+    fun theLockedEventsStayUntilTheMergedLogIsWritten() {
+        dpsFile.parentFile!!.mkdirs()
+        dpsFile.writeText(EventLog.json.encodeToString(event(0, EventType.A2DP_CONNECTED, "op")) + "\n")
+        var full = true
+        val ups = object : AtomicFile(upsFile) {
+            override fun startWrite(): FileOutputStream =
+                if (full) throw IOException("no space left") else super.startWrite()
+        }
+        val published = MutableStateFlow<List<LogEvent>?>(null)
+        val store = EventStore(ups, dpsFile, published)
+        // On the background thread in the app, the store itself doesn't care
+        store.load(openOperations = setOf("op"), enabled = true)
+        assertEquals(listOf("op"), published.value!!.map { it.opUID })
+        assertTrue(dpsFile.exists())
+        // The next rewrite writes the merged event, then the device protected file goes
+        full = false
+        store.clear(keptOperations = setOf("op"))
+        assertEquals(listOf("op"), EventLog.parse(upsFile.readLines()).map { it.opUID })
+        assertFalse(dpsFile.exists())
     }
 
     @Test

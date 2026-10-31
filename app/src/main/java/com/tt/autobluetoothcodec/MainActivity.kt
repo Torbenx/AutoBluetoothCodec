@@ -208,6 +208,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableLightEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // Starts loading the log in the background, merging the events logged before the unlock.
+        // The screen only logs on its own once a device is connected
+        EventLog.get(this)
 
         handler = Handler(mainLooper)
         CompanionPresence.syncAll(this)

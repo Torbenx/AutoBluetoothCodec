@@ -1,12 +1,16 @@
 package com.tt.autobluetoothcodec
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.os.UserManager
 import android.util.AtomicFile
 import android.util.Log
 import androidx.annotation.VisibleForTesting
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,8 +35,12 @@ import java.util.concurrent.TimeoutException
  * [EventStore], so nothing here waits for the file: [events] is null until the file is loaded, and
  * lags behind the events logged until the background thread has handled them. [flush] runs an
  * action once it has.
+ *
+ * Before the user unlocks the phone after a reboot, events go to a device protected file. The
+ * unlock broadcast queues the load that merges them into the log, or the next event or read that
+ * notices the unlock does, if the broadcast was missed.
  */
-class EventLog private constructor(context: Context) {
+class EventLog private constructor(private val context: Context) {
     companion object {
         private const val TAG = "EventLog"
         const val MAX_EVENTS = 1000
@@ -78,6 +86,11 @@ class EventLog private constructor(context: Context) {
         @VisibleForTesting
         fun restartForTest() {
             instance?.let { log ->
+                try {
+                    log.unregisterUnlockReceiver()
+                } catch (e: IllegalArgumentException) {
+                    // Robolectric dropped it with the application of an earlier test
+                }
                 log.executor.submit {}.get()
                 log.executor.shutdown()
             }
@@ -159,6 +172,8 @@ class EventLog private constructor(context: Context) {
 
     // Whether the load of the user protected file is queued, the events after it go to that file
     private var userStorageInitialized: Boolean = false
+    // Registered while the user is locked, until the load is queued
+    private var unlockReceiver: BroadcastReceiver? = null
 
     private val mutableEvents = MutableStateFlow<List<LogEvent>?>(null)
     private val readEvents: StateFlow<List<LogEvent>?> = mutableEvents.asStateFlow()
@@ -174,10 +189,34 @@ class EventLog private constructor(context: Context) {
         val enabled = enabled.value
         executor.execute { store.open(enabled) }
         updateUserUnlocked()
+        if (!userStorageInitialized)
+            registerUnlockReceiver()
+    }
+
+    /** Queues the load when the user unlocks, without waiting for the next event or read. */
+    private fun registerUnlockReceiver() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                updateUserUnlocked()
+            }
+        }
+        // Only sent to registered receivers. System broadcasts reach unexported receivers too
+        ContextCompat.registerReceiver(
+            context, receiver, IntentFilter(Intent.ACTION_USER_UNLOCKED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        unlockReceiver = receiver
+        // The user may have unlocked before the receiver was registered
+        updateUserUnlocked()
+    }
+
+    private fun unregisterUnlockReceiver() {
+        val receiver = unlockReceiver ?: return
+        unlockReceiver = null
+        context.unregisterReceiver(receiver)
     }
 
     private fun initWithUnlockedUser() {
         userStorageInitialized = true
+        unregisterUnlockReceiver()
         val open = HashSet(openOperations)
         val enabled = enabled.value
         executor.execute { store.load(open, enabled) }

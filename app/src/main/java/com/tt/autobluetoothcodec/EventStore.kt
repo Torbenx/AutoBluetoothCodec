@@ -29,6 +29,9 @@ internal class EventStore(
     private var nextSeq = 0L
     // Lines in the file, which may contain more events than are kept until it's rewritten
     private var fileLineCount = 0
+    // Whether events merged from the device protected file aren't in the user protected file yet.
+    // The device protected file is kept until they are, so they survive the process dying first
+    private var dpsMergePending = false
 
     /** Prepares the device protected file, deletes it if logging is disabled. */
     fun open(enabled: Boolean) {
@@ -58,9 +61,10 @@ internal class EventStore(
 
     /**
      * Reads the user protected file and merges the events of the device protected file into it,
-     * publishes the events, then rewrites the file if the merge changed it. Operations without a
-     * resolution are interrupted, except [openOperations]: those were open in this process when the
-     * load was queued, their later events follow it.
+     * publishes the events, then rewrites the file if the merge changed it. The device protected
+     * file is only deleted once its events are written. Operations without a resolution are
+     * interrupted, except [openOperations]: those were open in this process when the load was
+     * queued, their later events follow it.
      */
     fun load(openOperations: Set<String>, enabled: Boolean) {
         loaded = true
@@ -88,10 +92,13 @@ internal class EventStore(
         } catch (e: IOException) {
             Log.w(TAG, "reading the device protected log failed", e)
             emptyList()
-        } finally {
-            dpsFile.delete()
         }
         val dpsEvents = EventLog.parse(dpsLines).map { it.copy(seq = nextSeq++) }
+        // Deleted by the rewrite below once the events are written, which they always cause
+        if (dpsEvents.isEmpty())
+            dpsFile.delete()
+        else
+            dpsMergePending = true
 
         val allFileEvents = upsEvents + dpsEvents
         // Add interruption events for stale operations
@@ -160,6 +167,7 @@ internal class EventStore(
     fun deleteAll() {
         events = emptyList()
         fileLineCount = 0
+        dpsMergePending = false
         if (loaded)
             published.value = events
         dpsFile.delete()
@@ -185,6 +193,12 @@ internal class EventStore(
         } catch (e: IOException) {
             Log.w(TAG, "rewriting the log failed", e)
             upsFile.failWrite(stream)
+            // A later rewrite writes the merged events, the device protected file stays until then
+            return
+        }
+        if (dpsMergePending) {
+            dpsFile.delete()
+            dpsMergePending = false
         }
     }
 }
