@@ -1104,10 +1104,13 @@ private fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
 /** The test tag of a device's card. */
 internal fun deviceTag(device: DeviceData) = "device_" + device.address.uppercase()
 
-/** The main screen, the connected devices with their codecs. */
+/**
+ * The main screen, the connected devices with their codecs. The cards of the devices in
+ * [initiallyExpanded], by address, start expanded, for the previews.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
-internal fun MainScreen(state: MainScreenState, actions: MainScreenActions) {
+internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, initiallyExpanded: Set<String> = emptySet()) {
     Scaffold(
         // Lets UiAutomator find the elements by their test tags
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -1126,7 +1129,7 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions) {
             // Padding inside the scroll container, so the cards scroll behind the navigation bar
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
                 for (device in state.devices) {
-                    DeviceCard(device, initialExtended = false, state, actions)
+                    DeviceCard(device, initialExtended = device.address in initiallyExpanded, state, actions)
                 }
             }
         }

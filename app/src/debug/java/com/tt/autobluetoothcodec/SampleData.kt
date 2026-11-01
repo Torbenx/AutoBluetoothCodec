@@ -13,6 +13,10 @@ internal object SampleData {
     const val NAME = "Qudelix-5K"
     const val SONY_ADDRESS = "AC:80:0A:11:22:33"
     const val SONY_NAME = "Sony WH-1000XM5"
+    const val LONG_NAME = "A headphone with a much longer name than usual"
+
+    /** LC3, which the phones offer for LE Audio but this app doesn't know. */
+    const val CODEC_TYPE_LC3 = 5
 
     private const val RATES_44_48 = CodecConfig.SAMPLE_RATE_44100 or CodecConfig.SAMPLE_RATE_48000
     private const val RATES_ALL = RATES_44_48 or CodecConfig.SAMPLE_RATE_88200 or CodecConfig.SAMPLE_RATE_96000
@@ -91,25 +95,16 @@ internal object SampleData {
 
     val TODAY: LocalDate = LocalDate.of(2026, 10, 27)
 
-    /**
-     * Two days of the log: the preferred codec applied on connecting, an external change, a codec
-     * change that didn't take, a preferred codec saved with an association, a read failure and a
-     * timeout.
-     */
-    fun log(today: LocalDate = TODAY): List<LogEvent> {
+    /** Collects log events with increasing sequence numbers. */
+    private class LogBuilder {
         val events = ArrayList<LogEvent>()
-        val qudelix = LogDevice(ADDRESS, NAME)
-        val sony = LogDevice(SONY_ADDRESS, SONY_NAME)
-        val ldac = LogCodecConfig.of(ldac())
-        val aac = LogCodecConfig.of(aac())
-        val sbc = LogCodecConfig.of(sbc())
 
         fun add(
             type: EventType,
             day: LocalDate,
             time: String,
             opUID: String? = null,
-            device: LogDevice? = qudelix,
+            device: LogDevice? = LogDevice(ADDRESS, NAME),
             config: LogCodecConfig? = null,
             actual: LogCodecConfig? = null,
             attempt: Int? = null,
@@ -118,29 +113,75 @@ internal object SampleData {
             val millis = day.atTime(LocalTime.parse(time)).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             events.add(LogEvent(LogEvent.VERSION, events.size.toLong(), millis, type, opUID, device, config, actual, attempt, message))
         }
+    }
+
+    /**
+     * Two days of the log: the preferred codec applied on connecting, an external change, a codec
+     * change that didn't take, a preferred codec saved with an association, a read failure and a
+     * timeout.
+     */
+    fun log(today: LocalDate = TODAY): List<LogEvent> {
+        val log = LogBuilder()
+        val sony = LogDevice(SONY_ADDRESS, SONY_NAME)
+        val ldac = LogCodecConfig.of(ldac())
+        val aac = LogCodecConfig.of(aac())
+        val sbc = LogCodecConfig.of(sbc())
 
         val yesterday = today.minusDays(1)
-        add(EventType.A2DP_CONNECTED, yesterday, "18:02:11", "op1", config = ldac)
-        add(EventType.SET_CODEC_CONFIG, yesterday, "18:02:11", "op1", config = ldac, attempt = 1)
-        add(EventType.VALIDATE_CODEC_CONFIG, yesterday, "18:02:12", "op1", config = ldac, actual = ldac, attempt = 1)
-        add(EventType.CODEC_VERIFIED, yesterday, "18:02:12", "op1", actual = ldac, attempt = 1)
+        log.add(EventType.A2DP_CONNECTED, yesterday, "18:02:11", "op1", config = ldac)
+        log.add(EventType.SET_CODEC_CONFIG, yesterday, "18:02:11", "op1", config = ldac, attempt = 1)
+        log.add(EventType.VALIDATE_CODEC_CONFIG, yesterday, "18:02:12", "op1", config = ldac, actual = ldac, attempt = 1)
+        log.add(EventType.CODEC_VERIFIED, yesterday, "18:02:12", "op1", actual = ldac, attempt = 1)
 
-        add(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, today, "08:15:40", actual = sbc)
-        add(EventType.USER_SET_CODEC, today, "08:16:02", "op2", config = ldac)
+        log.add(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, today, "08:15:40", actual = sbc)
+        log.add(EventType.USER_SET_CODEC, today, "08:16:02", "op2", config = ldac)
         for (attempt in 1..3) {
-            add(EventType.SET_CODEC_CONFIG, today, "08:16:0${attempt * 2}", "op2", config = ldac, attempt = attempt)
-            add(EventType.VALIDATE_CODEC_CONFIG, today, "08:16:0${attempt * 2 + 1}", "op2", config = ldac, actual = sbc, attempt = attempt)
+            log.add(EventType.SET_CODEC_CONFIG, today, "08:16:0${attempt * 2}", "op2", config = ldac, attempt = attempt)
+            log.add(EventType.VALIDATE_CODEC_CONFIG, today, "08:16:0${attempt * 2 + 1}", "op2", config = ldac, actual = sbc, attempt = attempt)
         }
-        add(EventType.MAX_ATTEMPTS, today, "08:16:08", "op2", config = ldac, actual = sbc, attempt = 3)
+        log.add(EventType.MAX_ATTEMPTS, today, "08:16:08", "op2", config = ldac, actual = sbc, attempt = 3)
 
-        add(EventType.USER_SAVE_PREFERRED, today, "08:20:31", "op3", sony, config = aac)
-        add(EventType.ASSOCIATION_REQUESTED, today, "08:20:31", "op3", sony)
-        add(EventType.PREFERRED_SAVED, today, "08:20:44", "op3", sony)
+        log.add(EventType.USER_SAVE_PREFERRED, today, "08:20:31", "op3", sony, config = aac)
+        log.add(EventType.ASSOCIATION_REQUESTED, today, "08:20:31", "op3", sony)
+        log.add(EventType.PREFERRED_SAVED, today, "08:20:44", "op3", sony)
 
-        add(EventType.READ_FAILED, today, "12:40:03", device = sony,
+        log.add(EventType.READ_FAILED, today, "12:40:03", device = sony,
             message = "java.lang.SecurityException: Need BLUETOOTH_PRIVILEGED permission")
-        add(EventType.DEVICE_APPEARED, today, "12:41:00", "op4", sony, config = aac)
-        add(EventType.TIMEOUT, today, "12:41:10", "op4", sony)
-        return events
+        log.add(EventType.DEVICE_APPEARED, today, "12:41:00", "op4", sony, config = aac)
+        log.add(EventType.TIMEOUT, today, "12:41:10", "op4", sony)
+        return log.events
+    }
+
+    /**
+     * A log with what's rare: an entry from last week, a device without a name and one with a long
+     * name, an unknown codec, a failure with a long message, a slow operation, events without a
+     * device and an operation still in progress.
+     */
+    fun edgeCaseLog(today: LocalDate = TODAY): List<LogEvent> {
+        val log = LogBuilder()
+        val unnamed = LogDevice("F4:4E:FD:00:12:9A")
+        val longName = LogDevice("00:1A:7D:DA:71:13", LONG_NAME)
+        val ldac = LogCodecConfig.of(ldac())
+        val unknown = LogCodecConfig(AndroidCodecConfig(CODEC_TYPE_LC3, CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_16))
+
+        val lastWeek = today.minusDays(7)
+        log.add(EventType.PERMISSION_CHANGED, lastWeek, "21:13:05", device = null, message = "granted")
+        log.add(EventType.OBSERVING_CHANGED, lastWeek, "21:13:20", device = unnamed, message = "started")
+        log.add(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, lastWeek, "21:14:02", device = unnamed, actual = unknown)
+
+        log.add(EventType.USER_LINK_DEVICE, today, "07:01:00", "op1", longName)
+        log.add(EventType.ASSOCIATION_REQUESTED, today, "07:01:00", "op1", longName)
+        log.add(EventType.ASSOCIATION_CREATED, today, "07:03:41", "op1", longName)
+
+        log.add(EventType.USER_SET_CODEC, today, "07:05:12", "op2", longName, config = ldac)
+        log.add(EventType.SET_CODEC_CONFIG, today, "07:05:12", "op2", longName, config = ldac, attempt = 1)
+        log.add(EventType.ERROR, today, "07:05:13", "op2", longName, config = ldac, message =
+            "java.lang.IllegalStateException: setCodecConfigPreference failed for 00:1A:7D:DA:71:13, " +
+                "the Bluetooth stack returned BluetoothStatusCodes.ERROR_PROFILE_SERVICE_NOT_BOUND")
+
+        log.add(EventType.PROFILE_UNAVAILABLE, today, "07:30:00", device = null)
+        log.add(EventType.A2DP_CONNECTED, today, "09:12:44", "op3", config = ldac)
+        log.add(EventType.SET_CODEC_CONFIG, today, "09:12:44", "op3", config = ldac, attempt = 1)
+        return log.events
     }
 }
