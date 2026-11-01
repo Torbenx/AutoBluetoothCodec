@@ -627,7 +627,8 @@ internal enum class SelectedFill {
  * Prototype: how chips show what's selected, without a fill today's outline. The others are outlined faintly, or
  * in grey with [greyUnselected]. The prototypes also give the preferred codec's chip Restore's stronger green.
  */
-internal data class ChipStyle(val fill: SelectedFill? = null, val greyUnselected: Boolean = false)
+internal data class ChipStyle(val fill: SelectedFill? = null, val greyUnselected: Boolean = false,
+    val paleActive: Boolean = false)
 
 /** Prototype: the chip style to try. */
 internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle() }
@@ -699,8 +700,9 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
 
 /** Prototype: the preferred codec's green, Restore's stronger one in the prototyped chip styles. */
 @Composable
-private fun preferredColors(): Pair<Color, Color> =
-    if (LocalChipStyle.current.fill != null) AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
+private fun preferredColors(pale: Boolean = false): Pair<Color, Color> =
+    if (LocalChipStyle.current.fill != null && !pale)
+        AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
     else AppColors.status.successContainer to AppColors.status.onSuccessContainer
 
 @Composable
@@ -817,8 +819,9 @@ private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, m
 private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = preferredColors().first,
-        contentColor = preferredColors().second,
+        // Prototype: the pale green of round 1, to tell it from Restore
+        color = preferredColors(LocalChipStyle.current.paleActive).first,
+        contentColor = preferredColors(LocalChipStyle.current.paleActive).second,
         modifier = modifier.testTag("preferred_active")
     ) {
         PreferredContent("Active", Icons.Default.Check, showLabel)

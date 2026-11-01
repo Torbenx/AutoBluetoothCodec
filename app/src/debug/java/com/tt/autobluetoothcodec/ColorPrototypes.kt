@@ -506,7 +506,6 @@ internal val palettes = listOf(
     "Today's purple" to baseline,
     "Blue" to blue,
     "Vivid blue, fixed" to blueVividFixed,
-    "Neutral" to neutral,
 )
 
 /** The chips picked in round 2: inverse primary, the others faintly outlined. */
@@ -523,6 +522,9 @@ private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
                 NoMainActions, setOf(ADDRESS)
             )
         }
+    },
+    "Active" to {
+        AppTheme { MainScreen(state(device(preferred = ldac()), sony(preferred = aac())), NoMainActions, setOf(ADDRESS)) }
     },
     "Link states" to {
         AppTheme {
@@ -544,11 +546,11 @@ private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
 private fun WithColors(palette: PaletteOverride?, style: ChipStyle, content: @Composable () -> Unit) =
     CompositionLocalProvider(LocalPaletteOverride provides palette, LocalChipStyle provides style, content = content)
 
-private val logScreen: Pair<String, @Composable () -> Unit> = "Log" to { Screens.log.content() }
-
-/** The picked chips in the remaining palettes, and the log. */
+/** The picked chips in the remaining palettes; the "Active" label also in round 1's pale green. */
 internal val colorPrototypes: List<Scene> = palettes.flatMap { (paletteName, palette) ->
-    (colorScreens + logScreen).map { (screen, content) ->
+    colorScreens.map { (screen, content) ->
         Scene("Colors, $paletteName, $screen") { WithColors(palette, pickedChips) { content() } }
+    } + Scene("Colors, $paletteName, Active pale") {
+        WithColors(palette, pickedChips.copy(paleActive = true)) { colorScreens.first { it.first == "Active" }.second() }
     }
 }
