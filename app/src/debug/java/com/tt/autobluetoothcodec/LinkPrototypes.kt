@@ -45,7 +45,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tt.autobluetoothcodec.SampleData.device
-import com.tt.autobluetoothcodec.SampleData.ldac
 import com.tt.autobluetoothcodec.SampleData.sony
 
 /*
@@ -71,20 +70,21 @@ private val LinkOffIcon = icon("LinkOff",
 /** The states of a device that isn't linked. */
 internal enum class LinkState(val title: String) {
     HIDDEN("Codec hidden until linked"),
-    PREFERRED("Preferred codec, not linked"),
+    // Before Android 16 the codec can be read without a link; changing it or saving it asks to link first
+    READABLE("Codec readable, not linked"),
     LINKING("Linking"),
     CANT_LINK("Phone can't link"),
 }
 
 private fun deviceOf(state: LinkState) = when (state) {
-    LinkState.PREFERRED -> device(preferred = ldac(), associationRequired = true, associated = false)
+    LinkState.READABLE -> device(associationRequired = true, associated = false)
     else -> device(statusReadable = false, associationRequired = true, associated = false)
 }
 
 /** Why the device should be linked, without its name, which the card already shows. */
 private fun explanation(state: LinkState) = when (state) {
     LinkState.HIDDEN, LinkState.LINKING -> "Link this device to see and change its codec."
-    LinkState.PREFERRED -> "Link this device so its preferred codec is applied when it connects."
+    LinkState.READABLE -> "Link this device to change its codec and apply a preferred codec when it connects."
     LinkState.CANT_LINK -> "This phone can't link devices, so the codec can't be read or changed."
 }
 
@@ -103,6 +103,7 @@ internal enum class ExpandedDesign(val title: String) {
     ABOVE("Text above the button"),
     BELOW("Text below the button"),
     BANNER("Banner at the top"),
+    NO_BUTTON("No button while readable"),
 }
 
 /** Amber, for a state that needs attention without being an error. */
@@ -217,6 +218,23 @@ private fun LinkSection(state: LinkState, design: ExpandedDesign, topGap: Dp) {
     Column {
         Spacer(Modifier.height(topGap))
         when (design) {
+            // Choosing a codec and Save ask to link anyway, so a readable codec only gets a note
+            ExpandedDesign.NO_BUTTON -> if (state == LinkState.READABLE) {
+                Text(
+                    "Changing the codec or saving it as preferred asks to link this device first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            } else {
+                Text(if (canLink) "Not Linked" else "Can't Link", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+                Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
+                if (canLink) {
+                    Spacer(Modifier.height(8.dp))
+                    LinkButton(state)
+                }
+            }
             ExpandedDesign.SECTION -> {
                 Text(if (canLink) "Not Linked" else "Can't Link", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(4.dp))
@@ -328,7 +346,7 @@ private fun Collapsed(device: DeviceData, state: LinkState, design: CollapsedDes
                 Text(
                     when (state) {
                         LinkState.HIDDEN -> "Not linked, so the codec is hidden"
-                        LinkState.PREFERRED -> "Not linked, so the preferred codec isn't applied"
+                        LinkState.READABLE -> "Not linked, changing the codec asks to link it"
                         LinkState.LINKING -> "Linking…"
                         LinkState.CANT_LINK -> "This phone can't link devices"
                     },

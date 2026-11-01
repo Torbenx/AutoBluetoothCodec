@@ -106,6 +106,10 @@ internal val mainScreenStates = listOf(
         state(device(statusReadable = false, associationRequired = true, associated = false))),
     mainScene("Linking in progress",
         state(device(statusReadable = false, associationRequired = true, associated = false), associationInProgress = true)),
+    // Before Android 16 the codec can be read without a link, choosing one asks to link
+    mainScene("Codec readable, not linked",
+        state(device(associationRequired = true, associated = false))),
+    // Only if the link was removed after saving, saving asks to link
     mainScene("Preferred codec, not linked",
         state(device(preferred = ldac(), associationRequired = true, associated = false))),
     mainScene("Phone can't link",
