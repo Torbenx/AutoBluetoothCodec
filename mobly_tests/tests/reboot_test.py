@@ -11,7 +11,8 @@ TestConcept.md, below the C14 and C15 rows.
 Which phones are rebooted depends on their lock screen (D24): a pure test
 device gets the PIN 0000 for the locked reboot and loses it again, a
 personal phone's password is typed, and a phone whose password isn't known
-isn't rebooted. A locked reboot ends with a clean reboot (D26).
+isn't rebooted. A locked reboot ends with a clean reboot (D26). Every
+reboot is an unattended one, so a SIM with a PIN unlocks by itself.
 """
 
 import time
@@ -23,6 +24,7 @@ from lib import baseline
 from lib import bt_oracle
 from lib import device_state
 from lib import lock_screen
+from lib import sim_helper
 from lib.bt_oracle import same_format
 from tests.cold_start_test import APPEARANCE_TIMEOUT
 from tests.cold_start_test import ColdStartBase
@@ -31,6 +33,8 @@ from tests.cold_start_test import ColdStartBase
 UNLOCK_APPLY_TIMEOUT = 60.0
 # Since API 35 the system reports the device right at the unlock, from the presence events it held back
 UNLOCK_APPEARANCE_TIMEOUT = 60.0
+# How long the SIMs may take to unlock with their stored PINs, measured from the storage's unlock
+SIM_UNLOCK_TIMEOUT = 60.0
 
 
 class RebootTest(ColdStartBase):
@@ -61,15 +65,31 @@ class RebootTest(ColdStartBase):
     def unlock(self):
         """Unlocks the phone like a user would and returns the time, or aborts the run if it stays locked.
 
-        Tried once: a wrong password counts as a failed attempt, which brings
-        lockout delays and, on some phones, a factory reset.
+        First the storage, with locksettings verify. Then the password is typed
+        on the lock screen, but only once every SIM is loaded or absent: before,
+        the lock screen asks for a SIM PIN, and the password would count as a
+        wrong one. Tried once: a wrong password counts as a failed attempt,
+        which brings lockout delays and, on some phones, a factory reset.
         """
+        # A pure test device has no PIN again after the clean reboot
+        secret = lock_screen.password(self.testbed, self.ad.serial) if lock_screen.has_credential(self.adb) else None
         try:
-            lock_screen.unlock(self.adb, self.ad.serial, lock_screen.password(self.testbed, self.ad.serial))
+            lock_screen.verify(self.ad.serial, secret)
+            self.wait_for_sims()
+            lock_screen.unlock(self.adb, self.ad.serial, secret)
         except lock_screen.UnlockFailed as e:
             self._unlock_failed = True
             asserts.abort_all(f"{e}. Unlock {self.ad.serial} by hand, the suite doesn't try again")
         return time.time()
+
+    def wait_for_sims(self, timeout=SIM_UNLOCK_TIMEOUT):
+        """Waits until every SIM is loaded or absent, or raises UnlockFailed."""
+        end = time.time() + timeout
+        while not sim_helper.all_sims_loaded_or_absent(self.adb):
+            if time.time() >= end:
+                raise lock_screen.UnlockFailed(f"the SIMs didn't unlock within {timeout:.0f} s: "
+                                               f"{sim_helper.sim_states(self.adb)}, the password wasn't typed")
+            time.sleep(0.5)
 
     def reboot_locked(self, codec):
         """Saves [codec] as preferred and reboots with a secure lock screen. Returns the log's last seq
@@ -85,7 +105,7 @@ class RebootTest(ColdStartBase):
             self._pin_set = True
         mark = self.log.last_seq()
         self._locked_reboot = True
-        self.ad.reboot()
+        sim_helper.unattended_reboot(self.ad)
         asserts.assert_equal(lock_screen.RUNNING_LOCKED, lock_screen.user_state(self.adb),
                              "the user was unlocked without the lock screen, does the phone have a secure one?")
         try:
@@ -131,7 +151,7 @@ class RebootTest(ColdStartBase):
             lock_screen.clear_pin(self.adb, self.lock_class)
             self._pin_set = False
         if self._locked_reboot:
-            self.ad.reboot()
+            sim_helper.unattended_reboot(self.ad)
             self.unlock()
             self._locked_reboot = False
             # The baseline's repair connects the headset
@@ -145,7 +165,7 @@ class RebootTest(ColdStartBase):
         # The fixture granted the permission just before, and a reboot loses it until the system writes it
         app.wait_permission_persisted(self.adb)
         mark = self.log.last_seq()
-        self.ad.reboot()
+        sim_helper.unattended_reboot(self.ad)
         # A pure test device has no lock screen, the keyguard only needs dismissing
         device_state.wake(self.adb)
         device_state.shell(self.adb, "wm dismiss-keyguard")

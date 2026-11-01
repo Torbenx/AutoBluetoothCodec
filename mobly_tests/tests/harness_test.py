@@ -15,7 +15,7 @@ from mobly import records
 from mobly import signals
 
 import run_suite
-from lib import app, app_log, baseline, bt_oracle, companion, device_test, lock_screen
+from lib import app, app_log, baseline, bt_oracle, companion, device_test, lock_screen, sim_helper
 
 MOBLY_TESTS = pathlib.Path(__file__).resolve().parents[1]
 TESTDATA = MOBLY_TESTS / "testdata"
@@ -176,6 +176,22 @@ class LockScreenTest(unittest.TestCase):
             # YAML reads it as the octal number 83
             with self.assertRaises(ValueError):
                 lock_screen.password(testbed, "R2")
+
+
+class SimHelperTest(unittest.TestCase):
+    def test_simStates(self):
+        self.assertEqual(["LOADED", "ABSENT"], sim_helper.parse_sim_states("LOADED,ABSENT\n"))
+        self.assertEqual(["ABSENT"], sim_helper.parse_sim_states("ABSENT"))
+        # The API 28 Pixel, whose radio doesn't run
+        self.assertEqual([], sim_helper.parse_sim_states(""))
+        self.assertEqual(["PIN_REQUIRED", ""], sim_helper.parse_sim_states("PIN_REQUIRED,"))
+
+    def test_prepareResult(self):
+        self.assertEqual(0, sim_helper.parse_prepare_result("0\n"))
+        self.assertEqual(1, sim_helper.parse_prepare_result("WARNING: linker: something\n1"))
+        for output in ("", "Aborted"):
+            with self.assertRaises(RuntimeError):
+                sim_helper.parse_prepare_result(output)
 
 
 class AppLogTest(unittest.TestCase):
