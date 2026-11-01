@@ -105,12 +105,16 @@ internal class PreviewScreenshots(private val shot: Shot) {
             for (scene in logScreenStates)
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("3 Log states", scene, device))
-            for (scene in collapsedPrototypes)
-                for (device in CONFIGURATIONS.filter { !it.dark } + SMALL_PHONE_LARGE_FONT)
+            for (device in listOf(PHONE, PHONE_DARK))
+                shots.add(Shot("5 Prototypes", collapsedPrototype, device))
+            for (scene in expandedPrototypes) {
+                val devices = mutableListOf(PHONE, PHONE_DARK, SMALL_PHONE_LARGE_FONT)
+                // The wide Save stops at the cap
+                if ("wide Save" in scene.name)
+                    devices.add(CONFIGURATIONS.last())
+                for (device in devices)
                     shots.add(Shot("5 Prototypes", scene, device))
-            for (scene in expandedPrototypes)
-                for (device in listOf(PHONE, SMALL_PHONE_LARGE_FONT, CONFIGURATIONS.last()))
-                    shots.add(Shot("5 Prototypes", scene, device))
+            }
             for ((scene, interaction) in interactions)
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,

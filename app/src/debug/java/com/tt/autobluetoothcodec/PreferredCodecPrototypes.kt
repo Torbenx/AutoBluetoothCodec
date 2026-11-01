@@ -1,11 +1,11 @@
 package com.tt.autobluetoothcodec
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -19,22 +19,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,6 +38,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -50,6 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tt.autobluetoothcodec.SampleData.LONG_NAME
 import com.tt.autobluetoothcodec.SampleData.aac
@@ -58,27 +57,12 @@ import com.tt.autobluetoothcodec.SampleData.ldac
 import com.tt.autobluetoothcodec.SampleData.sony
 
 /*
- * Prototypes for where the device card shows its preferred codec, to compare the options before one of them
- * replaces the status button in the card's header. Only the parts that differ are prototyped, the codec chips
- * and the codec selection are the app's own.
+ * Prototypes for the device card without the status button in its header. Collapsed, the card shows a "Preferred
+ * Codec" chip after the codec chips while the preferred codec is active (chosen). Expanded, it has three equal slots
+ * for saving, restoring and deleting the preferred codec at its bottom (chosen); these prototypes try colors, button
+ * styles, ways to show that the preferred codec is active, and a wide Save button when nothing is saved. Only the
+ * parts that differ are prototyped, the codec chips and the codec selection are the app's own.
  */
-
-/** Where the collapsed card shows that the preferred codec is active. */
-internal enum class CollapsedVariant(val title: String) {
-    INLINE("Last chip"),
-    OWN_LINE("Own line"),
-}
-
-/** What the expanded card offers for the preferred codec, at its bottom. */
-internal enum class ExpandedVariant(val title: String) {
-    SAVE_WHEN_NEEDED("Save button only when needed"),
-    MORPHING_CHIP("Status chip that turns into a button"),
-    GROUP_DISABLED("Button group, unavailable disabled"),
-    GROUP_STATUS("Button group, unavailable as status"),
-    FILLING("Filling buttons"),
-    FILLING_STATUS("Filling buttons with a status line"),
-    FIXED_SLOTS("Equal slots, unavailable disabled"),
-}
 
 /** The preferred codec's state, which decides which actions are available. */
 internal enum class PreferredState(val title: String) {
@@ -91,6 +75,211 @@ private fun stateOf(device: DeviceData) = when {
     device.preferredConfig == null -> PreferredState.NONE
     device.preferredConfig == device.codecConfig -> PreferredState.ACTIVE
     else -> PreferredState.DIFFERS
+}
+
+/** How the action buttons are drawn. */
+internal enum class ButtonStyle(val title: String) {
+    MONO("Monochrome outline"),
+    OUTLINE("Colored outline"),
+    ICON("Colored icons"),
+    TONAL("Tonal"),
+    TONAL_OUTLINE("Tonal with outline"),
+    FILLED("Filled"),
+}
+
+/** How the Save slot looks while the preferred codec is active. */
+internal enum class ActiveTreatment {
+    /** Save is disabled like Restore. */
+    DISABLED,
+    /** Save turns into "Saved" with a check mark and stays enabled. */
+    SAVED,
+    /** Save and Restore make way for one "Active" label as wide as both. */
+    SPAN,
+    /** Like [SPAN], shaped like the collapsed card's chip instead of a button. */
+    SPAN_CHIP,
+}
+
+/** One combination of the experiments. */
+internal class Design(
+    val name: String,
+    val style: ButtonStyle,
+    val active: ActiveTreatment = ActiveTreatment.DISABLED,
+    /** Whether Save takes the whole row while nothing is saved. */
+    val wideSave: Boolean = false,
+)
+
+/** What an action is, which decides its color. */
+private enum class ActionRole { SAVE, RESTORE, DELETE, NEUTRAL }
+
+/** An action's colors: as text and outline, as a tonal container, and as a filled button. */
+private class RoleColors(val accent: Color, val container: Color, val onContainer: Color, val fill: Color, val onFill: Color)
+
+@Composable
+private fun roleColors(role: ActionRole): RoleColors {
+    val scheme = MaterialTheme.colorScheme
+    val dark = scheme.surface.luminance() < 0.5f
+    return when (role) {
+        // Gold, dark enough for text on a light card
+        ActionRole.SAVE -> if (dark) RoleColors(Color(0xFFF5C542), Color(0xFF5A4300), Color(0xFFFFDF99), Color(0xFFF5C542), Color(0xFF3F2E00))
+            else RoleColors(Color(0xFF8F6A00), Color(0xFFFFDF99), Color(0xFF261A00), Color(0xFFF2B705), Color(0xFF261A00))
+        ActionRole.RESTORE -> if (dark) RoleColors(Color(0xFF8ED793), Color(0xFF1E5124), Color(0xFFB6F2B4), Color(0xFF8ED793), Color(0xFF00390D))
+            else RoleColors(Color(0xFF2E7D32), Color(0xFFC3EFC0), Color(0xFF002106), Color(0xFF2E7D32), Color.White)
+        ActionRole.DELETE -> RoleColors(scheme.error, scheme.errorContainer, scheme.onErrorContainer, scheme.error, scheme.onError)
+        ActionRole.NEUTRAL -> RoleColors(scheme.primary, scheme.secondaryContainer, scheme.onSecondaryContainer, scheme.primary, scheme.onPrimary)
+    }
+}
+
+/** A pill-shaped action in one of the [ButtonStyle]s, disabled like Material's buttons. */
+@Composable
+private fun ActionButton(
+    label: String,
+    icon: ImageVector,
+    role: ActionRole,
+    style: ButtonStyle,
+    enabled: Boolean,
+    showLabel: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val c = roleColors(if (style == ButtonStyle.MONO) ActionRole.NEUTRAL else role)
+    var container = Color.Transparent
+    var content = c.accent
+    var iconColor = c.accent
+    var border: Color? = c.accent
+    when (style) {
+        ButtonStyle.MONO -> border = scheme.outline
+        ButtonStyle.OUTLINE -> {}
+        ButtonStyle.ICON -> { content = scheme.onSurface; border = scheme.outline }
+        ButtonStyle.TONAL -> { container = c.container; content = c.onContainer; iconColor = c.onContainer; border = null }
+        ButtonStyle.TONAL_OUTLINE -> { container = c.container; content = c.onContainer; iconColor = c.onContainer }
+        ButtonStyle.FILLED -> { container = c.fill; content = c.onFill; iconColor = c.onFill; border = null }
+    }
+    if (!enabled) {
+        if (container != Color.Transparent)
+            container = scheme.onSurface.copy(alpha = 0.12f)
+        content = scheme.onSurface.copy(alpha = 0.38f)
+        iconColor = content
+        border = border?.let { scheme.onSurface.copy(alpha = 0.12f) }
+    }
+    Surface(
+        onClick = {},
+        enabled = enabled,
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+        border = border?.let { BorderStroke(1.dp, it) },
+        modifier = modifier,
+    ) {
+        PillContent(label, icon, iconColor, showLabel)
+    }
+}
+
+/** The label that says the preferred codec is active, in the success colors like the collapsed card's chip. */
+@Composable
+private fun ActiveLabel(showLabel: Boolean, chip: Boolean, modifier: Modifier = Modifier) {
+    Surface(
+        shape = if (chip) RoundedCornerShape(8.dp) else CircleShape,
+        color = AppColors.status.successContainer,
+        contentColor = AppColors.status.onSuccessContainer,
+        modifier = modifier,
+    ) {
+        PillContent("Active", Icons.Default.Check, AppColors.status.onSuccessContainer, showLabel)
+    }
+}
+
+@Composable
+private fun PillContent(label: String, icon: ImageVector, iconColor: Color, showLabel: Boolean) {
+    Row(
+        Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = if (showLabel) null else label, tint = iconColor, modifier = Modifier.size(18.dp))
+        if (showLabel) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        }
+    }
+}
+
+/** What fills a slot of the action row. */
+private sealed class Cell(val slots: Int) {
+    class Action(val label: String, val icon: ImageVector, val role: ActionRole, val enabled: Boolean, slots: Int = 1) : Cell(slots)
+    class Active(val chip: Boolean, slots: Int) : Cell(slots)
+}
+
+private fun cellsOf(state: PreferredState, design: Design): List<Cell> {
+    if (state == PreferredState.NONE && design.wideSave)
+        return listOf(Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE, true, slots = 3))
+    val delete = Cell.Action("Delete", Icons.Default.Delete, ActionRole.DELETE, state != PreferredState.NONE)
+    if (state == PreferredState.ACTIVE) {
+        when (design.active) {
+            ActiveTreatment.SPAN -> return listOf(Cell.Active(chip = false, slots = 2), delete)
+            ActiveTreatment.SPAN_CHIP -> return listOf(Cell.Active(chip = true, slots = 2), delete)
+            ActiveTreatment.SAVED -> return listOf(
+                Cell.Action("Saved", Icons.Default.Check, ActionRole.SAVE, true),
+                Cell.Action("Restore", Icons.Default.Refresh, ActionRole.RESTORE, false),
+                delete,
+            )
+            ActiveTreatment.DISABLED -> {}
+        }
+    }
+    return listOf(
+        Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE, state != PreferredState.ACTIVE),
+        Cell.Action("Restore", Icons.Default.Refresh, ActionRole.RESTORE, state == PreferredState.DIFFERS),
+        delete,
+    )
+}
+
+/**
+ * Three equal slots, at most 420 dp wide together. If the labels don't fit in a third, as with the largest font on
+ * a small phone, Save and Restore share the first row and Delete has the second, so the labels stay.
+ */
+@Composable
+private fun SlotActions(state: PreferredState, design: Design) {
+    BoxWithConstraints(Modifier.widthIn(max = 420.dp).fillMaxWidth()) {
+        val gap = 8.dp
+        val measurer = rememberTextMeasurer()
+        val style = MaterialTheme.typography.labelLarge
+        val density = LocalDensity.current
+        val full = maxWidth
+        val third = (full - gap * 2) / 3
+        // Icon 18, its gap 8 and the padding 16 on each side
+        val labelsFit = listOf("Save", "Saved", "Restore", "Delete", "Active").all {
+            with(density) { measurer.measure(it, style, softWrap = false).size.width.toDp() } + 18.dp + 8.dp + 32.dp <= third
+        }
+        val cells = cellsOf(state, design)
+
+        @Composable
+        fun CellView(cell: Cell, width: Dp) {
+            val modifier = Modifier.width(width)
+            when (cell) {
+                is Cell.Action -> ActionButton(cell.label, cell.icon, cell.role, design.style, cell.enabled, showLabel = true, modifier)
+                is Cell.Active -> ActiveLabel(showLabel = true, cell.chip, modifier)
+            }
+        }
+
+        if (labelsFit) {
+            Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
+                for (cell in cells)
+                    CellView(cell, third * cell.slots + gap * (cell.slots - 1))
+            }
+        } else {
+            // Two columns: the cells of the first two slots on the first row, Delete under Restore on the second
+            val half = (full - gap) / 2
+            Column(verticalArrangement = Arrangement.spacedBy(gap)) {
+                val first = cells.filter { it !is Cell.Action || it.label != "Delete" }
+                val delete = cells.firstOrNull { it is Cell.Action && it.label == "Delete" }
+                Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
+                    for (cell in first)
+                        CellView(cell, if (cell.slots >= 2) full else half)
+                }
+                if (delete != null) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { CellView(delete, half) }
+                }
+            }
+        }
+    }
 }
 
 /** The label that says the preferred codec is active, colored like the success it is. */
@@ -109,175 +298,30 @@ private fun PreferredChip() {
     }
 }
 
-/** The codec chips of the collapsed card, like the app shows them. */
-@Composable
-private fun CodecChips(config: CodecConfig) {
-    CodecConfig.getCodecName(config.getCodecType())?.let { ActiveConfigChip(it) }
-    CodecConfig.getSampleRate(config.sampleRate)?.let { ActiveConfigChip("$it Hz") }
-    CodecConfig.getBitsPerSample(config.bitsPerSample)?.let { ActiveConfigChip("$it bits/sample") }
-    if (config is LDACCodecConfig) {
-        if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
-            ActiveConfigChip("Adaptive")
-        } else {
-            LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)?.let { ActiveConfigChip("$it kbps") }
-        }
-    }
-}
-
+/** The codec chips of the collapsed card, like the app shows them, and the preferred chip after them. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CollapsedContent(device: DeviceData, variant: CollapsedVariant) {
+private fun CollapsedContent(device: DeviceData) {
     val config = device.codecConfig ?: return
-    val active = stateOf(device) == PreferredState.ACTIVE
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        CodecChips(config)
-        if (active && variant == CollapsedVariant.INLINE)
+        CodecConfig.getCodecName(config.getCodecType())?.let { ActiveConfigChip(it) }
+        CodecConfig.getSampleRate(config.sampleRate)?.let { ActiveConfigChip("$it Hz") }
+        CodecConfig.getBitsPerSample(config.bitsPerSample)?.let { ActiveConfigChip("$it bits/sample") }
+        if (config is LDACCodecConfig) {
+            if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
+                ActiveConfigChip("Adaptive")
+            } else {
+                LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)?.let { ActiveConfigChip("$it kbps") }
+            }
+        }
+        if (stateOf(device) == PreferredState.ACTIVE)
             PreferredChip()
     }
-    if (active && variant == CollapsedVariant.OWN_LINE) {
-        Spacer(Modifier.height(8.dp))
-        PreferredChip()
-    }
 }
 
-private class PreferredAction(val label: String, val icon: ImageVector, val available: Boolean, val done: String)
-
-private fun actionsOf(state: PreferredState) = listOf(
-    PreferredAction("Save", Icons.Default.Star, state != PreferredState.ACTIVE, "Saved"),
-    PreferredAction("Restore", Icons.Default.Refresh, state == PreferredState.DIFFERS, "Applied"),
-    PreferredAction("Delete", Icons.Default.Delete, state != PreferredState.NONE, "Nothing saved"),
-)
-
+/** A device card whose header only has the name. */
 @Composable
-private fun SectionTitle(text: String) = Text(text, style = MaterialTheme.typography.titleSmall)
-
-/** A line under the section's title that says what's saved. */
-@Composable
-private fun StatusLine(device: DeviceData) {
-    val text = when (stateOf(device)) {
-        PreferredState.NONE -> "None saved yet. The preferred codec is applied whenever the device connects."
-        PreferredState.ACTIVE -> "The current codec is the preferred one."
-        PreferredState.DIFFERS -> "Saved: ${device.preferredConfig!!.describe()}"
-    }
-    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun ExpandedActions(device: DeviceData, variant: ExpandedVariant) {
-    val state = stateOf(device)
-    val actions = actionsOf(state)
-    when (variant) {
-        ExpandedVariant.SAVE_WHEN_NEEDED -> {
-            if (state != PreferredState.ACTIVE) {
-                Spacer(Modifier.height(16.dp))
-                FilledTonalButton(onClick = {}) { Text("Save As Preferred Codec") }
-            }
-        }
-        ExpandedVariant.MORPHING_CHIP -> {
-            Spacer(Modifier.height(16.dp))
-            StatusChip(
-                if (state == PreferredState.ACTIVE) "Preferred Codec" else "Save As Preferred Codec",
-                statusChipColors(AppColors.status.successContainer, AppColors.status.onSuccessContainer),
-                isButton = state != PreferredState.ACTIVE,
-                onButtonClick = {}
-            )
-        }
-        ExpandedVariant.GROUP_DISABLED, ExpandedVariant.GROUP_STATUS -> {
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("Preferred Codec")
-            Spacer(Modifier.height(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (action in actions) {
-                    if (action.available || variant == ExpandedVariant.GROUP_DISABLED) {
-                        OutlinedButton(onClick = {}, enabled = action.available) { Text(action.label) }
-                    } else {
-                        // Takes the button's place, so nothing moves
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.heightIn(min = 40.dp)
-                        ) {
-                            Box40 { Text(action.done, style = MaterialTheme.typography.labelLarge) }
-                        }
-                    }
-                }
-            }
-        }
-        ExpandedVariant.FILLING, ExpandedVariant.FILLING_STATUS -> {
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("Preferred Codec")
-            if (variant == ExpandedVariant.FILLING_STATUS) {
-                Spacer(Modifier.height(2.dp))
-                StatusLine(device)
-            }
-            Spacer(Modifier.height(8.dp))
-            FillingButtons(actions.filter { it.available })
-        }
-        ExpandedVariant.FIXED_SLOTS -> {
-            Spacer(Modifier.height(16.dp))
-            SectionTitle("Preferred Codec")
-            Spacer(Modifier.height(8.dp))
-            // All three always, so nothing moves, at most as wide as on a phone
-            FillingButtons(actions, Modifier.widthIn(max = 420.dp))
-        }
-    }
-}
-
-/** Centers its content in the height of a button. */
-@Composable
-private fun Box40(content: @Composable () -> Unit) {
-    Row(Modifier.heightIn(min = 40.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-        content()
-    }
-}
-
-/** The available actions side by side, sharing the width; just their icons if a label doesn't fit. */
-@Composable
-private fun FillingButtons(actions: List<PreferredAction>, modifier: Modifier = Modifier) {
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-        val gap = 8.dp
-        val each = (maxWidth - gap * (actions.size - 1)) / actions.size
-        val measurer = rememberTextMeasurer()
-        val style = MaterialTheme.typography.labelLarge
-        val density = LocalDensity.current
-        // Icon 18, its gap 8 and the button's padding 16 on each side
-        val labelsFit = actions.all {
-            with(density) { measurer.measure(it.label, style, softWrap = false).size.width.toDp() } + 18.dp + 8.dp + 32.dp <= each
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-            for (action in actions) {
-                OutlinedButton(
-                    onClick = {},
-                    enabled = action.available,
-                    // Keeps the height of a button with a label when it only has its icon
-                    modifier = Modifier.weight(1f).heightIn(min = 40.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
-                ) {
-                    Icon(action.icon, contentDescription = if (labelsFit) null else action.label,
-                        modifier = Modifier.size(ButtonDefaults.IconSize))
-                    if (labelsFit) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(action.label, maxLines = 1)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A device card with the header that only has the name, and the preferred codec where a variant puts it. */
-@Composable
-private fun PrototypeCard(
-    device: DeviceData,
-    expanded: Boolean,
-    collapsed: CollapsedVariant,
-    expandedVariant: ExpandedVariant,
-) {
-    // The two variants that keep only a button need the menu for restoring and deleting
-    val menu = expanded && device.preferredConfig != null &&
-        expandedVariant in setOf(ExpandedVariant.SAVE_WHEN_NEEDED, ExpandedVariant.MORPHING_CHIP)
+private fun PrototypeCard(device: DeviceData, design: Design?) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         shadowElevation = 6.dp,
@@ -292,37 +336,34 @@ private fun PrototypeCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (menu) {
-                    IconButton(onClick = {}) { Icon(Icons.Default.MoreVert, contentDescription = "More options") }
-                }
             }
             Spacer(Modifier.height(8.dp))
-            if (expanded) {
+            if (design != null) {
                 CodecConfigSelection(device) {}
-                ExpandedActions(device, expandedVariant)
+                Spacer(Modifier.height(16.dp))
+                Text("Preferred Codec", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(8.dp))
+                SlotActions(stateOf(device), design)
             } else {
-                CollapsedContent(device, collapsed)
+                CollapsedContent(device)
             }
         }
     }
 }
 
+/** The main screen with the devices, expanded in [design] or collapsed if it's null. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PrototypeScreen(
-    devices: List<DeviceData>,
-    expanded: Boolean,
-    collapsed: CollapsedVariant = CollapsedVariant.OWN_LINE,
-    expandedVariant: ExpandedVariant = ExpandedVariant.FILLING,
-) = AppTheme {
+private fun PrototypeScreen(devices: List<DeviceData>, design: Design?) = AppTheme {
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         // Expanded, the actions are at the bottom of the card, which may be out of view
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(if (expanded) Int.MAX_VALUE else 0)).padding(innerPadding)) {
+        val scroll = rememberScrollState(if (design != null) Int.MAX_VALUE else 0)
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(innerPadding)) {
             for (device in devices)
-                PrototypeCard(device, expanded, collapsed, expandedVariant)
+                PrototypeCard(device, design)
         }
     }
 }
@@ -346,22 +387,30 @@ private fun expandedDevice(state: PreferredState) = when (state) {
     PreferredState.DIFFERS -> device(ldac(CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24), preferred = LDAC_990)
 }
 
-/** The collapsed cards, one scene per variant. */
-internal val collapsedPrototypes = CollapsedVariant.entries.map { variant ->
-    Scene("Collapsed, ${variant.title}") { PrototypeScreen(collapsedDevices, expanded = false, collapsed = variant) }
-}
+/** The combinations to compare: the styles, then the active state and the wide Save in two of them. */
+internal val prototypeDesigns = ButtonStyle.entries.map { Design(it.title, it) } + listOf(
+    Design("Colored outline, Saved", ButtonStyle.OUTLINE, ActiveTreatment.SAVED),
+    Design("Tonal, Saved", ButtonStyle.TONAL, ActiveTreatment.SAVED),
+    Design("Colored outline, Active across two slots", ButtonStyle.OUTLINE, ActiveTreatment.SPAN),
+    Design("Tonal, Active across two slots", ButtonStyle.TONAL, ActiveTreatment.SPAN),
+    Design("Tonal, Active as a chip", ButtonStyle.TONAL, ActiveTreatment.SPAN_CHIP),
+    Design("Colored outline, Active, wide Save", ButtonStyle.OUTLINE, ActiveTreatment.SPAN, wideSave = true),
+    Design("Tonal, Active, wide Save", ButtonStyle.TONAL, ActiveTreatment.SPAN, wideSave = true),
+    Design("Tonal, Active as a chip, wide Save", ButtonStyle.TONAL, ActiveTreatment.SPAN_CHIP, wideSave = true),
+)
 
-/** The expanded card, one scene per variant and state of the preferred codec. */
-internal val expandedPrototypes = ExpandedVariant.entries.flatMap { variant ->
+/** The collapsed cards with the preferred chip after the codec chips. */
+internal val collapsedPrototype = Scene("Collapsed") { PrototypeScreen(collapsedDevices, null) }
+
+/** The expanded card, one scene per design and state of the preferred codec. */
+internal val expandedPrototypes = prototypeDesigns.flatMap { design ->
     PreferredState.entries.map { state ->
-        Scene("Expanded, ${variant.title}, ${state.title}") {
-            PrototypeScreen(listOf(expandedDevice(state)), expanded = true, expandedVariant = variant)
-        }
+        Scene("Expanded, ${design.name}, ${state.title}") { PrototypeScreen(listOf(expandedDevice(state)), design) }
     }
 }
 
 private class PrototypeScenes : PreviewParameterProvider<Scene> {
-    override val values = (collapsedPrototypes + expandedPrototypes).asSequence()
+    override val values = (listOf(collapsedPrototype) + expandedPrototypes).asSequence()
 }
 
 @StatePreviews
