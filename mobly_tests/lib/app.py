@@ -18,6 +18,8 @@ PACKAGE = "com.tt.autobluetoothcodec"
 SNIPPET_PACKAGE = PACKAGE + ".snippet"
 TEST_PACKAGE = PACKAGE + ".test"
 PERMISSION = "android.permission.BLUETOOTH_CONNECT"
+# The device protected data directory, which holds the preferences; run-as starts in the user protected one
+DE_DATA_DIR = f"/data/user_de/0/{PACKAGE}"
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 APK = ROOT / "app/build/outputs/apk/debug/app-debug.apk"
@@ -156,9 +158,11 @@ def reset_auto_revoke(adb):
 
 
 def data_files(adb):
-    """The files the app stores, relative to its data directory."""
-    out = device_state.shell(adb, f"run-as {PACKAGE} sh -c 'ls -1 files/logs shared_prefs 2>/dev/null' || true")
-    return [line for line in out.splitlines() if line and not line.endswith(":")]
+    """The files the app stores in its user protected and device protected data directories."""
+    out = device_state.shell(
+        adb, f"run-as {PACKAGE} sh -c 'find files shared_prefs {DE_DATA_DIR}/files {DE_DATA_DIR}/shared_prefs"
+             f" -type f 2>/dev/null' || true")
+    return [line for line in out.splitlines() if line]
 
 
 def sdk(adb):

@@ -264,7 +264,8 @@ class BtLogicTest(SnippetTest):
 
     def test_b9_observing(self):
         """Observing: on with a preferred codec, off when it's deleted, and after clearing the app's
-        data the next start turns it off. Whether the link stays is recorded (6.7)."""
+        data the next start turns it off. The preferences file holds the preferred codec while it's
+        saved. Whether the link stays is recorded (6.7)."""
         self.require(self.sdk >= 33, "observing only shows in dumpsys since API 33")
 
         def wait_observing(expected, what):
@@ -275,14 +276,32 @@ class BtLogicTest(SnippetTest):
                     asserts.fail(f"{what}: observing isn't {expected}")
                 time.sleep(0.5)
 
+        def wait_stored(expected, what):
+            """Waits until the file holds [expected] for the headset, None for no preferred codec."""
+            end = time.time() + 5
+            # SharedPreferences writes the file on a background thread
+            while True:
+                stored = baseline.preferred_codecs(self.adb)
+                asserts.assert_is_not_none(stored, f"{what}: the preferences are unreadable")
+                codec = stored.get(self.address.upper())
+                if codec == expected:
+                    return
+                if time.time() >= end:
+                    asserts.fail(f"{what}: the file holds {codec}, not {expected}")
+                time.sleep(0.2)
+
         self.snippet.setPreferredCodec(self.address, SBC_44_16.to_app())
+        wait_stored(SBC_44_16, "with a preferred codec")
         wait_observing(True, "with a preferred codec")
         self.snippet.deletePreferredCodec(self.address)
+        wait_stored(None, "after deleting it")
         wait_observing(False, "after deleting it")
         self.snippet.setPreferredCodec(self.address, SBC_44_16.to_app())
+        wait_stored(SBC_44_16, "with a preferred codec again")
         wait_observing(True, "with a preferred codec again")
         self.ad.unload_snippet(SNIPPET)
         app.clear_data(self.adb)
+        wait_stored(None, "after clearing the data")
         linked = companion.is_linked(self.adb, app.PACKAGE, self.address)
         observing = linked and companion.is_observing(self.adb, app.PACKAGE, self.address)
         self.ad.log.info("B9 after clearing the data on API %d: linked %s, observing %s", self.sdk, linked, observing)

@@ -14,6 +14,7 @@ so no state survives in memory.
 """
 
 import html
+import json
 import re
 import time
 
@@ -30,6 +31,8 @@ CONNECT_TIMEOUT = 40.0
 SETTINGS_TIMEOUT = 90.0
 # pm clear removes the link on API 36 within about 0.1 s, measured on the S24
 UNLINK_TIMEOUT = 5.0
+# Printed by preferred_codecs() once the app's data directory is open
+READABLE = "readable"
 
 
 def foreground_activity(adb):
@@ -39,9 +42,20 @@ def foreground_activity(adb):
 
 
 def preferred_codecs(adb):
-    """The addresses the app has preferred codecs for, from its preferences file."""
-    out = device_state.shell(adb, f"run-as {app.PACKAGE} cat shared_prefs/preferred_codecs.xml 2>/dev/null || true")
-    return re.findall(r'<string name="([^"]+)"', out)
+    """The app's preferred codecs from its preferences file, a Codec for each address, or None if
+    its data directory can't be read.
+
+    The marker tells a missing file, which means no preferred codecs, from a failed run-as or a
+    wrong directory, which would otherwise look the same.
+    """
+    out = device_state.shell(
+        adb, f"run-as {app.PACKAGE} sh -c 'cd {app.DE_DATA_DIR} && echo {READABLE}"
+             f" && cat shared_prefs/preferred_codecs.xml 2>/dev/null' || true")
+    if not out.startswith(READABLE):
+        return None
+    # Each value is the JSON of an AndroidCodecConfig, escaped as XML
+    return {address: bt_oracle.Codec.from_app(json.loads(html.unescape(value)))
+            for address, value in re.findall(r'<string name="([^"]+)">([^<]*)</string>', out)}
 
 
 def element_bounds(xml, text):
@@ -121,7 +135,9 @@ class Baseline:
         if events:
             problems.append(f"log has {len(events)} events, the last {events[-1]['type']}")
         preferred = preferred_codecs(adb)
-        if preferred:
+        if preferred is None:
+            problems.append("preferred codecs unreadable")
+        elif preferred:
             problems.append(f"preferred codecs for {', '.join(preferred)}")
         if app.is_stopped(adb):
             problems.append("package is stopped")
