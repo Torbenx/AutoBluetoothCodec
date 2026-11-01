@@ -10,6 +10,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
@@ -144,18 +145,20 @@ class LogActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableLightEdgeToEdge()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val file = logFile
         if (file != null)
             loadFile(file)
         setContent {
-            if (file != null) {
-                LogScreen(fileEvents, LocalDate.now(), actions, fileName = fileName ?: "Log file")
-            } else {
-                val events by log.events.collectAsState()
-                val enabled by log.enabled.collectAsState()
-                LogScreen(events, LocalDate.now(), actions, enabled, showDevelopmentOptions)
+            AppTheme {
+                if (file != null) {
+                    LogScreen(fileEvents, LocalDate.now(), actions, fileName = fileName ?: "Log file")
+                } else {
+                    val events by log.events.collectAsState()
+                    val enabled by log.enabled.collectAsState()
+                    LogScreen(events, LocalDate.now(), actions, enabled, showDevelopmentOptions)
+                }
             }
         }
     }

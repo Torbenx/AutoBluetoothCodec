@@ -74,6 +74,13 @@ android {
     }
 }
 
+androidComponents {
+    // The UI tests use the example data in the debug source set, see SampleData
+    beforeVariants(selector().withBuildType("release")) {
+        it.enableUnitTest = false
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = JvmTarget.JVM_11

@@ -10,9 +10,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.util.withContext
+import com.tt.autobluetoothcodec.SampleData.device
+import com.tt.autobluetoothcodec.SampleData.state
 import com.tt.autobluetoothcodec.UiTestData.RecordingActions
-import com.tt.autobluetoothcodec.UiTestData.device
-import com.tt.autobluetoothcodec.UiTestData.state
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test

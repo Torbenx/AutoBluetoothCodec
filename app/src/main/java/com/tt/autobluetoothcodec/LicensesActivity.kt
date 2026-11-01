@@ -3,6 +3,7 @@ package com.tt.autobluetoothcodec
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
@@ -24,25 +25,27 @@ import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 class LicensesActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableLightEdgeToEdge()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Third-party licenses") },
-                        navigationIcon = {
-                            IconButton(onClick = ::finish) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            AppTheme {
+                Scaffold(
+                    topBar = {
+                        TopAppBar(
+                            title = { Text("Third-party licenses") },
+                            navigationIcon = {
+                                IconButton(onClick = ::finish) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                }
                             }
-                        }
-                    )
-                },
-                // Also keeps the content clear of display cutouts in landscape
-                contentWindowInsets = WindowInsets.safeDrawing
-            ) { innerPadding ->
-                // Padding inside the list, so the entries scroll behind the navigation bar
-                LibrariesContainer(Modifier.fillMaxSize(), contentPadding = innerPadding)
+                        )
+                    },
+                    // Also keeps the content clear of display cutouts in landscape
+                    contentWindowInsets = WindowInsets.safeDrawing
+                ) { innerPadding ->
+                    // Padding inside the list, so the entries scroll behind the navigation bar
+                    LibrariesContainer(Modifier.fillMaxSize(), contentPadding = innerPadding)
+                }
             }
         }
     }

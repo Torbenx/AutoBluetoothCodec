@@ -22,6 +22,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
@@ -94,7 +95,7 @@ internal enum class PermissionState { GRANTED, DENIED, PERMANENTLY_DENIED }
 
 /** A connected device as the main screen shows it. */
 internal data class DeviceData(
-    val device: BluetoothDevice,
+    val address: String,
     val name: String,
     val androidCodecConfig: AndroidCodecConfig?,
     // null if the codec is unknown to this app or no codec status is available
@@ -124,12 +125,12 @@ internal interface MainScreenActions {
     fun openAppSettings()
     fun openLog()
     fun openAbout()
-    fun setCodec(device: BluetoothDevice, config: CodecConfig)
-    fun savePreferred(device: BluetoothDevice, config: CodecConfig)
-    fun restorePreferred(device: BluetoothDevice, config: CodecConfig)
-    fun deletePreferred(device: BluetoothDevice)
-    fun link(device: BluetoothDevice)
-    fun unlink(device: BluetoothDevice)
+    fun setCodec(address: String, config: CodecConfig)
+    fun savePreferred(address: String, config: CodecConfig)
+    fun restorePreferred(address: String, config: CodecConfig)
+    fun deletePreferred(address: String)
+    fun link(address: String)
+    fun unlink(address: String)
 }
 
 class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
@@ -173,13 +174,17 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         override fun openAppSettings() = this@MainActivity.openAppSettings()
         override fun openLog() = startActivity(Intent(this@MainActivity, LogActivity::class.java))
         override fun openAbout() = startActivity(Intent(this@MainActivity, AboutActivity::class.java))
-        override fun setCodec(device: BluetoothDevice, config: CodecConfig) = setCodecConfig(device, config)
-        override fun savePreferred(device: BluetoothDevice, config: CodecConfig) = savePreferredConfig(device, config)
-        override fun restorePreferred(device: BluetoothDevice, config: CodecConfig) = restorePreferredConfig(device, config)
-        override fun deletePreferred(device: BluetoothDevice) = deletePreferredConfig(device)
-        override fun link(device: BluetoothDevice) = linkDevice(device)
-        override fun unlink(device: BluetoothDevice) = unlinkDevice(device)
+        override fun setCodec(address: String, config: CodecConfig) = setCodecConfig(remoteDevice(address), config)
+        override fun savePreferred(address: String, config: CodecConfig) = savePreferredConfig(remoteDevice(address), config)
+        override fun restorePreferred(address: String, config: CodecConfig) = restorePreferredConfig(remoteDevice(address), config)
+        override fun deletePreferred(address: String) = deletePreferredConfig(remoteDevice(address))
+        override fun link(address: String) = linkDevice(remoteDevice(address))
+        override fun unlink(address: String) = unlinkDevice(remoteDevice(address))
     }
+
+    /** The device the main screen shows with [address], only shown devices have one. */
+    private fun remoteDevice(address: String): BluetoothDevice =
+        getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(address)
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
@@ -206,7 +211,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableLightEdgeToEdge()
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         // Starts loading the log in the background, merging the events logged before the unlock.
         // The screen only logs on its own once a device is connected
@@ -222,16 +227,18 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         }
 
         setContent {
-            MainScreen(
-                MainScreenState(
-                    permissionState = permissionState,
-                    devices = connectedDevices,
-                    canAssociate = PermissionUtil.canAssociate(this),
-                    associationInProgress = associationInProgress,
-                    showDevelopmentOptions = showDevelopmentOptions
-                ),
-                actions
-            )
+            AppTheme {
+                MainScreen(
+                    MainScreenState(
+                        permissionState = permissionState,
+                        devices = connectedDevices,
+                        canAssociate = PermissionUtil.canAssociate(this),
+                        associationInProgress = associationInProgress,
+                        showDevelopmentOptions = showDevelopmentOptions
+                    ),
+                    actions
+                )
+            }
         }
 
         lifecycleScope.launch {
@@ -486,8 +493,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             emptyList()
         }
         connectedDevices = devices.map { readDeviceData(profile, it) }
-        for (data in connectedDevices)
-            logObservedCodec(data)
+        for ((device, data) in devices.zip(connectedDevices))
+            logObservedCodec(device, data)
     }
 
     /**
@@ -495,19 +502,19 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
      * one read in a process as well, and new read errors. While the applier changes the codec of a
      * device, its operation logs the codecs instead.
      */
-    private fun logObservedCodec(data: DeviceData) {
-        val address = data.device.address.uppercase()
+    private fun logObservedCodec(device: BluetoothDevice, data: DeviceData) {
+        val address = device.address.uppercase()
         val error = data.readError
         if (error != null) {
             if (readFailures.add(address))
-                log.log(EventType.READ_FAILED, LogDevice.of(data.device), message = error)
+                log.log(EventType.READ_FAILED, LogDevice.of(device), message = error)
             return
         }
         readFailures.remove(address)
         val config = data.androidCodecConfig ?: return
         if (address !in applier.pending.value && config != applier.knownCodec(address)) {
             applier.noteObservedCodec(address, config)
-            log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice.of(data.device), actual = LogCodecConfig.of(config))
+            log.log(EventType.ACTIVITY_OBSERVED_EXTERNAL_CODEC_CHANGE, LogDevice.of(device), actual = LogCodecConfig.of(config))
         }
     }
 
@@ -521,7 +528,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             val androidConfig = A2dpProfileUtil.getCurrentCodecConfig(profile, device)
             Log.d(TAG, androidConfig.toString())
             return DeviceData(
-                device = device,
+                address = device.address,
                 name = name,
                 androidCodecConfig = androidConfig,
                 codecConfig = androidConfig?.let { CodecConfig.fromAndroid(it) },
@@ -534,10 +541,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         } catch (e: SecurityException) {
             // Since API 36 reading the codec status requires an association as well
             Log.d(TAG, "Bluetooth refused to report the codec status of $name")
-            return DeviceData(device, name, null, null, ArrayList(), statusReadable = false, associationRequired, associated, preferredConfig, readError = e.toString())
+            return DeviceData(device.address, name, null, null, ArrayList(), statusReadable = false, associationRequired, associated, preferredConfig, readError = e.toString())
         } catch (e: Exception) {
             Log.e(TAG, "reading the codec status of $name failed", e)
-            return DeviceData(device, name, null, null, ArrayList(), statusReadable = true, associationRequired, associated, preferredConfig, readError = e.toString())
+            return DeviceData(device.address, name, null, null, ArrayList(), statusReadable = true, associationRequired, associated, preferredConfig, readError = e.toString())
         }
     }
 
@@ -905,7 +912,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                             labelTextColor = Color(0xFF388E3C)
                         ),
                         isButton = !isPreferredActive,
-                        onButtonClick = { actions.savePreferred(device.device, currentConfig) }
+                        onButtonClick = { actions.savePreferred(device.address, currentConfig) }
                     )
                 }
                 if (preferredConfig != null || (state.showDevelopmentOptions && device.associated)) {
@@ -953,7 +960,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
             AnimatedVisibility(extended && device.statusReadable) {
                 CodecConfigSelection(
                     device,
-                    onConfigChange = { actions.setCodec(device.device, it) }
+                    onConfigChange = { actions.setCodec(device.address, it) }
                 )
             }
         }
@@ -978,7 +985,7 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
                     modifier = Modifier.testTag("restore_preferred"),
                     onClick = {
                         expanded = false
-                        actions.restorePreferred(device.device, preferredConfig)
+                        actions.restorePreferred(device.address, preferredConfig)
                     }
                 )
             }
@@ -988,7 +995,7 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
                     modifier = Modifier.testTag("delete_preferred"),
                     onClick = {
                         expanded = false
-                        actions.deletePreferred(device.device)
+                        actions.deletePreferred(device.address)
                     }
                 )
             }
@@ -998,7 +1005,7 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
                     modifier = Modifier.testTag("unlink_device"),
                     onClick = {
                         expanded = false
-                        actions.unlink(device.device)
+                        actions.unlink(device.address)
                     }
                 )
             }
@@ -1023,7 +1030,7 @@ private fun AssociationRow(device: DeviceData, canAssociate: Boolean, associatio
         )
         Spacer(Modifier.height(8.dp))
         Button(
-            onClick = { actions.link(device.device) },
+            onClick = { actions.link(device.address) },
             modifier = Modifier.testTag("link_device"),
             enabled = !associationInProgress
         ) {
@@ -1095,7 +1102,7 @@ private fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
 }
 
 /** The test tag of a device's card. */
-internal fun deviceTag(device: DeviceData) = "device_" + device.device.address.uppercase()
+internal fun deviceTag(device: DeviceData) = "device_" + device.address.uppercase()
 
 /** The main screen, the connected devices with their codecs. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
