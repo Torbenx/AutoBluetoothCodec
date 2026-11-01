@@ -573,7 +573,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
 @Composable
-private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
+internal fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
     val color = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -598,11 +598,11 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
 }
 
 @Composable
-private fun ActiveConfigChip(text: String) {
+internal fun ActiveConfigChip(text: String) {
     ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
-private data class StatusChipColors(
+internal data class StatusChipColors(
     val labelBackgroundColor: Color,
     val labelTextColor: Color,
     val buttonBackgroundColor: Color,
@@ -610,7 +610,7 @@ private data class StatusChipColors(
 )
 
 @Composable
-private fun statusChipColors(
+internal fun statusChipColors(
     labelBackgroundColor: Color,
     labelTextColor: Color,
     buttonBackgroundColor: Color = MaterialTheme.colorScheme.primaryContainer,
@@ -620,7 +620,7 @@ private fun statusChipColors(
 }
 
 @Composable
-private fun StatusChip(
+internal fun StatusChip(
     text: String,
     colors: StatusChipColors,
     isButton: Boolean,
@@ -778,7 +778,7 @@ private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @Cod
 }
 
 @Composable
-private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
+internal fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
     Column {
         val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
         ConfigSelectRow(
