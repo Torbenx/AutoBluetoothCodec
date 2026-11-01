@@ -254,7 +254,8 @@ def main():
     request_overlap = set(requested_suites) & set(filtered_suites.keys())
     if request_overlap:
         report_suite = next(iter(request_overlap))
-        sys.exit(f"suite '{report_suite}' requested explicitly and via tests '{"', '".join(filtered_suites[report_suite])}'")
+        via_tests = "', '".join(filtered_suites[report_suite])
+        sys.exit(f"suite '{report_suite}' requested explicitly and via tests '{via_tests}'")
 
     suites_and_tests = filtered_suites | {suite: None for suite in requested_suites}
 
