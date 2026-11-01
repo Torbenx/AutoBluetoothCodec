@@ -21,6 +21,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -58,6 +59,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -65,6 +68,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -72,6 +76,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -81,7 +87,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
@@ -94,6 +102,7 @@ import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -361,6 +370,60 @@ private fun eventColor(type: EventType): Color {
     return if (type in FAILURES) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
 }
 
+/** The width of the column the times are in, null if each time is above its text instead. */
+private val LocalTimeColumn = staticCompositionLocalOf<Dp?> { null }
+
+/** How far the lines below an event's text are indented, so they line up with the text. */
+private val timeIndent: Dp
+    @Composable @ReadOnlyComposable get() = LocalTimeColumn.current ?: 0.dp
+
+// The widest times of a day, in the 12- and the 24-hour format
+private val WIDEST_TIMES = listOf(LocalTime.of(10, 58, 58), LocalTime.of(22, 58, 58))
+
+/**
+ * The width of the time column for the current locale and font size: the widest time and a gap. Null if that
+ * would take more than a third of [availableWidth], with large fonts or on small screens, so the times go above
+ * their texts.
+ */
+@Composable
+private fun timeColumnWidth(availableWidth: Dp): Dp? {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.bodySmall
+    val density = LocalDensity.current
+    val locale = LocalConfiguration.current.locales[0]
+    val width = remember(measurer, style, density, locale) {
+        val pixels = WIDEST_TIMES.maxOf { measurer.measure(timeFormatter.format(it), style, softWrap = false).size.width }
+        with(density) { pixels.toDp() } + 12.dp
+    }
+    return if (width <= availableWidth / 3) width else null
+}
+
+/** An event's time and text, side by side in the time column or the time above the text, see [LocalTimeColumn]. */
+@Composable
+private fun TimedText(time: Long, text: String, color: Color) {
+    val column = LocalTimeColumn.current
+    val timeText = @Composable { modifier: Modifier ->
+        Text(
+            timeFormatter.format(zoned(time)),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier.testTag("log_time")
+        )
+    }
+    if (column == null) {
+        Column {
+            timeText(Modifier)
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
+        }
+    } else {
+        // The time is smaller than the text, aligning their baselines keeps it on the first line
+        Row {
+            timeText(Modifier.width(column).alignByBaseline())
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = color, modifier = Modifier.alignByBaseline())
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String? = null, onClick: (() -> Unit)? = null) {
@@ -402,28 +465,14 @@ private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String?
             .then(gestures)
             .padding(horizontal = 16.dp, vertical = 2.dp)
     ) {
-        // The time is smaller than the text, aligning their baselines keeps it on the first line
-        Row {
-            Text(
-                timeFormatter.format(zoned(event.time)),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(80.dp).alignByBaseline()
-            )
-            Text(
-                describe(event) + suffix,
-                style = MaterialTheme.typography.bodyMedium,
-                color = eventColor(event.type),
-                modifier = Modifier.alignByBaseline()
-            )
-        }
+        TimedText(event.time, describe(event) + suffix, eventColor(event.type))
         val message = event.message
         if (message != null && event.type !in MESSAGE_DESCRIBED) {
             Text(
                 message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 80.dp)
+                modifier = Modifier.padding(start = timeIndent)
             )
         }
         if (showJson) {
@@ -434,7 +483,7 @@ private fun EventRow(event: LogEvent, suffix: String = "", onClickLabel: String?
                 fontFamily = FontFamily.Monospace,
                 softWrap = false,
                 modifier = Modifier
-                    .padding(start = 80.dp, top = 4.dp)
+                    .padding(start = timeIndent, top = 4.dp)
                     .horizontalScroll(rememberScrollState())
             )
         }
@@ -503,20 +552,11 @@ private fun OperationSummary(entry: LogEntry) {
     val resolution = entry.resolution
     // Padded like EventRow, so the summary and the trigger's row line up when expanding
     Column(Modifier.padding(horizontal = 16.dp, vertical = 2.dp)) {
-        Row {
-            Text(
-                timeFormatter.format(zoned(entry.first.time)),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(80.dp).alignByBaseline()
-            )
-            Text(
-                describeOperation(entry),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.alignByBaseline()
-            )
-        }
+        TimedText(
+            entry.first.time,
+            describeOperation(entry),
+            if (resolution != null) eventColor(resolution.type) else MaterialTheme.colorScheme.onSurface
+        )
         // "Failed" alone doesn't say what went wrong
         val message = resolution?.message
         if (resolution?.type == EventType.ERROR && message != null) {
@@ -524,7 +564,7 @@ private fun OperationSummary(entry: LogEntry) {
                 message,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 80.dp)
+                modifier = Modifier.padding(start = timeIndent)
             )
         }
     }
@@ -760,26 +800,30 @@ internal fun LogScreen(
                 }
                 return@Column
             }
-            LazyColumn(
-                contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
-                verticalArrangement = Arrangement.Top
-            ) {
-                var day: LocalDate? = null
-                for (entry in entries) {
-                    val entryDay = zoned(entry.first.time).toLocalDate()
-                    if (entryDay != day) {
-                        day = entryDay
-                        item(key = "day $entryDay") {
-                            Text(
-                                describeDay(entryDay, today),
-                                style = MaterialTheme.typography.titleSmall,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
-                            )
+            BoxWithConstraints {
+                CompositionLocalProvider(LocalTimeColumn provides timeColumnWidth(maxWidth)) {
+                    LazyColumn(
+                        contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
+                        verticalArrangement = Arrangement.Top
+                    ) {
+                        var day: LocalDate? = null
+                        for (entry in entries) {
+                            val entryDay = zoned(entry.first.time).toLocalDate()
+                            if (entryDay != day) {
+                                day = entryDay
+                                item(key = "day $entryDay") {
+                                    Text(
+                                        describeDay(entryDay, today),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+                                    )
+                                }
+                            } else {
+                                item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
+                            }
+                            item(key = entry.first.seq) { EntryItem(entry) }
                         }
-                    } else {
-                        item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
                     }
-                    item(key = entry.first.seq) { EntryItem(entry) }
                 }
             }
         }

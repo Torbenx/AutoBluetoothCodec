@@ -908,8 +908,8 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                     StatusChip(
                         if (isPreferredActive) "Preferred Codec" else "Save As Preferred Codec",
                         statusChipColors(
-                            labelBackgroundColor = Color(0xFFE8F5E9),
-                            labelTextColor = Color(0xFF388E3C)
+                            labelBackgroundColor = AppColors.status.successContainer,
+                            labelTextColor = AppColors.status.onSuccessContainer
                         ),
                         isButton = !isPreferredActive,
                         onButtonClick = { actions.savePreferred(device.address, currentConfig) }
