@@ -615,7 +615,7 @@ internal enum class ChipStyle {
     OUTLINED,
     /** Material's filter chip: selected ones filled in the secondary container's color with a check. */
     FILTER,
-    /** Selected ones filled in the theme's color, the collapsed card's in its lighter container color. */
+    /** Selected ones filled in the theme's color, the others outlined. */
     SOLID,
     /** No outlines: the others in grey, selected ones filled in the theme's color. */
     TONAL,
@@ -624,13 +624,9 @@ internal enum class ChipStyle {
 /** Prototype: the chip style to try. */
 internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle.OUTLINED }
 
-/**
- * A chip of the codec's values. [active] is a chip of the collapsed card, which shows the current codec and can't be
- * chosen.
- */
+/** A chip of the codec's values. The collapsed card's chips look like the selected ones, but can't be chosen. */
 @Composable
-private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, active: Boolean = false,
-    onClick: () -> Unit) {
+private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val style = LocalChipStyle.current
     val container: Color
@@ -651,42 +647,26 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
             content = scheme.onSurfaceVariant
             border = scheme.outlineVariant
         }
-        ChipStyle.SOLID -> when {
-            active -> {
-                container = scheme.primaryContainer
-                content = scheme.onPrimaryContainer
-                border = null
-            }
-            selected -> {
-                container = scheme.primary
-                content = scheme.onPrimary
-                border = null
-            }
-            else -> {
-                container = Color.Transparent
-                content = scheme.onSurfaceVariant
-                border = scheme.outline
-            }
+        ChipStyle.SOLID -> if (selected) {
+            container = scheme.primary
+            content = scheme.onPrimary
+            border = null
+        } else {
+            container = Color.Transparent
+            content = scheme.onSurfaceVariant
+            border = scheme.outline
         }
-        ChipStyle.TONAL -> when {
-            active -> {
-                container = scheme.secondaryContainer
-                content = scheme.onSecondaryContainer
-                border = null
-            }
-            selected -> {
-                container = scheme.primary
-                content = scheme.onPrimary
-                border = null
-            }
-            else -> {
-                container = scheme.surfaceContainerHighest
-                content = scheme.onSurfaceVariant
-                border = null
-            }
+        ChipStyle.TONAL -> if (selected) {
+            container = scheme.primary
+            content = scheme.onPrimary
+            border = null
+        } else {
+            container = scheme.surfaceContainerHighest
+            content = scheme.onSurfaceVariant
+            border = null
         }
     }
-    val check = style == ChipStyle.FILTER && selected && !active
+    val check = style == ChipStyle.FILTER && selected
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
             shape = RoundedCornerShape(8.dp),
@@ -713,7 +693,7 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
 
 @Composable
 private fun ActiveConfigChip(text: String) {
-    ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false, active = true)
+    ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
 /** The chip of the collapsed card that says the preferred codec is active, after the codec's chips. */
