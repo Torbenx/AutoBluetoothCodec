@@ -779,6 +779,7 @@ internal fun LogScreen(
     ) { innerPadding ->
         val layoutDirection = LocalLayoutDirection.current
         // The bottom padding is inside the list, so the entries scroll behind the navigation bar
+        CappedContent(WIDE_CONTENT) { side ->
         Column(
             Modifier.fillMaxSize().padding(
                 start = innerPadding.calculateStartPadding(layoutDirection),
@@ -795,15 +796,15 @@ internal fun LogScreen(
                     !loggingEnabled -> "Logging is disabled"
                     else -> "No events logged yet"
                 }
-                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().padding(horizontal = side).padding(24.dp), contentAlignment = Alignment.Center) {
                     Text(text, style = MaterialTheme.typography.bodyLarge)
                 }
                 return@Column
             }
             BoxWithConstraints {
-                CompositionLocalProvider(LocalTimeColumn provides timeColumnWidth(maxWidth)) {
+                CompositionLocalProvider(LocalTimeColumn provides timeColumnWidth(maxWidth - side * 2)) {
                     LazyColumn(
-                        contentPadding = PaddingValues(bottom = innerPadding.calculateBottomPadding()),
+                        contentPadding = PaddingValues(start = side, end = side, bottom = innerPadding.calculateBottomPadding()),
                         verticalArrangement = Arrangement.Top
                     ) {
                         var day: LocalDate? = null
@@ -826,6 +827,7 @@ internal fun LogScreen(
                     }
                 }
             }
+        }
         }
     }
     if (showExportDialog)

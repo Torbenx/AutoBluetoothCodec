@@ -142,7 +142,8 @@ internal fun AboutScreen(version: String, actions: AboutScreenActions) {
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         // Padding inside the scroll container, so the content scrolls behind the navigation bar
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
+        CappedContent(NARROW_CONTENT) { side ->
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding).padding(horizontal = side)) {
             Column(
                 Modifier.fillMaxWidth().padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
@@ -182,6 +183,7 @@ internal fun AboutScreen(version: String, actions: AboutScreenActions) {
                 },
                 modifier = Modifier.testTag("privacy")
             )
+        }
         }
     }
 }

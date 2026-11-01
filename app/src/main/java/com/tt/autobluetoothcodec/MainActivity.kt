@@ -78,6 +78,8 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -153,6 +155,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     companion object {
         private const val TAG = "MainActivity"
         private const val COMPANION_TAG = "CompanionAssociation"
+        private const val FIRST_DEVICES_SEEN = "first_devices_seen"
 
         // Kept per process, so the activity being recreated doesn't log the same state again
         private var loggedPermissionState: PermissionState? = null
@@ -229,6 +232,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // After a rotation the cards keep their own state
+        firstDevicesSeen = savedInstanceState?.getBoolean(FIRST_DEVICES_SEEN) ?: false
         // Starts loading the log in the background, merging the events logged before the unlock.
         // The screen only logs on its own once a device is connected
         EventLog.get(this)
@@ -252,7 +257,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                         linkingAddress = linkingAddress,
                         showDevelopmentOptions = showDevelopmentOptions
                     ),
-                    actions
+                    actions,
+                    initiallyExpanded = autoExpanded
                 )
             }
         }
@@ -263,6 +269,11 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                 applier.pending.collect { pullBluetoothState() }
             }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(FIRST_DEVICES_SEEN, firstDevicesSeen)
     }
 
     override fun onDestroy() {
@@ -496,6 +507,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     private var handler: Handler? = null
 
     private var connectedDevices by mutableStateOf(emptyList<DeviceData>())
+    // A lone device on the first list with devices in it starts expanded, once per activity
+    private var autoExpanded by mutableStateOf(emptySet<String>())
+    private var firstDevicesSeen = false
 
     private fun pullBluetoothState() {
         val profile = a2dpProfile
@@ -510,6 +524,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             emptyList()
         }
         connectedDevices = devices.map { readDeviceData(profile, it) }
+        if (!firstDevicesSeen && devices.isNotEmpty()) {
+            firstDevicesSeen = true
+            autoExpanded = connectedDevices.singleOrNull()?.let { setOf(it.address) } ?: emptySet()
+        }
         for ((device, data) in devices.zip(connectedDevices))
             logObservedCodec(device, data)
     }
@@ -1033,7 +1051,8 @@ private fun CodecChips(device: DeviceData, state: MainScreenState) {
 
 @Composable
 private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: MainScreenState, actions: MainScreenActions) {
-    var extended by remember { mutableStateOf(initialExtended) }
+    // Unlike remember, survives the screen being rotated
+    var extended by rememberSaveable { mutableStateOf(initialExtended) }
     val modifier = Modifier.fillMaxWidth().padding(16.dp).testTag(deviceTag(device))
     val content = @Composable {
         Column(modifier = Modifier.padding(10.dp)) {
@@ -1314,12 +1333,26 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, init
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         if (state.permissionState != PermissionState.GRANTED) {
-            PermissionRequired(Modifier.padding(innerPadding), state.permissionState, actions)
+            CappedContent(NARROW_CONTENT) { side ->
+                PermissionRequired(Modifier.padding(innerPadding).padding(horizontal = side), state.permissionState, actions)
+            }
         } else {
-            // Padding inside the scroll container, so the cards scroll behind the navigation bar
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)) {
-                for (device in state.devices) {
-                    DeviceCard(device, initialExtended = device.address in initiallyExpanded, state, actions)
+            CappedContent(NARROW_CONTENT) { side ->
+                // At least as tall as the window, so the cards can sit lower when they don't fill it
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val windowHeight = maxHeight
+                    // Padding inside the scroll container, so the cards scroll behind the navigation bar
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                        Column(
+                            Modifier.fillMaxWidth().heightIn(min = windowHeight).padding(innerPadding)
+                                .padding(horizontal = side),
+                            verticalArrangement = BiasArrangement(LocalContentLayout.current.devicePlacement)
+                        ) {
+                            for (device in state.devices) key(device.address) {
+                                DeviceCard(device, initialExtended = device.address in initiallyExpanded, state, actions)
+                            }
+                        }
+                    }
                 }
             }
         }

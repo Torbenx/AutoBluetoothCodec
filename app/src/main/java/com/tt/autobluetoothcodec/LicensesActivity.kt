@@ -5,7 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -54,6 +58,17 @@ internal fun LicensesScreen(onBack: () -> Unit) {
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         // Padding inside the list, so the entries scroll behind the navigation bar
-        LibrariesContainer(Modifier.fillMaxSize(), contentPadding = innerPadding)
+        CappedContent(WIDE_CONTENT) { side ->
+            val layoutDirection = LocalLayoutDirection.current
+            LibrariesContainer(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    start = innerPadding.calculateStartPadding(layoutDirection) + side,
+                    top = innerPadding.calculateTopPadding(),
+                    end = innerPadding.calculateEndPadding(layoutDirection) + side,
+                    bottom = innerPadding.calculateBottomPadding()
+                )
+            )
+        }
     }
 }
