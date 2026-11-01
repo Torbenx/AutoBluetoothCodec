@@ -611,7 +611,7 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
 }
 
 @Composable
-private fun ActiveConfigChip(text: String) {
+internal fun ActiveConfigChip(text: String) {
     ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
@@ -663,12 +663,12 @@ private fun preferredSlots(device: DeviceData): List<PreferredSlot> {
 
 /** The size of the icons in the preferred codec's row, 18 dp at the normal font size, growing with the labels. */
 @Composable
-private fun preferredIconSize(): Dp =
+internal fun preferredIconSize(): Dp =
     with(LocalDensity.current) { (MaterialTheme.typography.labelLarge.fontSize * (18f / 14f)).toDp() }
 
 /** The icon and the label of an action, or just the icon, which is then as tall as the label would be. */
 @Composable
-private fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
+internal fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
     val style = MaterialTheme.typography.labelLarge
     Row(
         Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -739,7 +739,7 @@ private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
  * keeps its height whatever is available.
  */
 @Composable
-private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
+internal fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
     val slots = preferredSlots(device)
     if (slots.isEmpty())
         return
@@ -879,7 +879,7 @@ private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @Cod
 }
 
 @Composable
-private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
+internal fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
     Column {
         val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
         ConfigSelectRow(
@@ -980,6 +980,47 @@ private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfi
     }
 }
 
+/** The collapsed card's chips: the codec, then the preferred codec's chip while it's active, then [extra]. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun CodecChips(device: DeviceData, extra: @Composable () -> Unit = {}) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val config = device.codecConfig
+        if (config == null) {
+            ActiveConfigChip(if (device.androidCodecConfig != null) "Unsupported codec" else "No codec information")
+            extra()
+            return@FlowRow
+        }
+        CodecConfig.getCodecName(config.getCodecType())?.let {
+            ActiveConfigChip(it)
+        }
+        CodecConfig.getSampleRate(config.sampleRate)?.let {
+            ActiveConfigChip("$it Hz")
+        }
+        CodecConfig.getBitsPerSample(config.bitsPerSample)?.let {
+            ActiveConfigChip("$it bits/sample")
+        }
+        if (config is LDACCodecConfig) {
+            if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
+                ActiveConfigChip("Adaptive")
+            } else {
+                LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)
+                    ?.let { ActiveConfigChip("$it kbps") }
+                    ?: LDACCodecConfig.getFixedBitrate(config.bitrate)
+                        ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
+            }
+        }
+        // Last, so the codec's chips stay where they are when it comes and goes
+        if (device.preferredConfig == config) {
+            PreferredChip()
+        }
+        extra()
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: MainScreenState, actions: MainScreenActions) {
@@ -1017,39 +1058,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                 Spacer(Modifier.height(8.dp))
             }
             AnimatedVisibility(!extended && device.statusReadable) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    val config = device.codecConfig
-                    if (config == null) {
-                        ActiveConfigChip(if (device.androidCodecConfig != null) "Unsupported codec" else "No codec information")
-                        return@FlowRow
-                    }
-                    CodecConfig.getCodecName(config.getCodecType())?.let {
-                        ActiveConfigChip(it)
-                    }
-                    CodecConfig.getSampleRate(config.sampleRate)?.let {
-                        ActiveConfigChip("$it Hz")
-                    }
-                    CodecConfig.getBitsPerSample(config.bitsPerSample)?.let {
-                        ActiveConfigChip("$it bits/sample")
-                    }
-                    if (config is LDACCodecConfig) {
-                        if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {
-                            ActiveConfigChip("Adaptive")
-                        } else {
-                            LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)
-                                ?.let { ActiveConfigChip("$it kbps") }
-                                ?: LDACCodecConfig.getFixedBitrate(config.bitrate)
-                                    ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
-                        }
-                    }
-                    // Last, so the codec's chips stay where they are when it comes and goes
-                    if (device.preferredConfig == config) {
-                        PreferredChip()
-                    }
-                }
+                CodecChips(device)
             }
             AnimatedVisibility(extended && device.statusReadable) {
                 Column {
