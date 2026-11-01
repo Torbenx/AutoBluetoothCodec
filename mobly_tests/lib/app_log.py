@@ -137,6 +137,17 @@ class AppLog:
         out = device_state.shell(self.adb, f"run-as {self.package} ls {LOG_FILE} 2>/dev/null || true")
         return out.strip() != ""
 
+    def locked_line_count(self):
+        """The lines of the device protected file, in which the events logged before the first unlock
+        wait for the merge, or None if there is none. Readable once the user is unlocked.
+
+        Its lines will be encrypted, so only whether it exists and how many lines it has are checked.
+        """
+        path = f"/data/user_de/0/{self.package}/{LOG_FILE}"
+        out = device_state.shell(
+            self.adb, f"run-as {self.package} sh -c 'test -f {path} && wc -l < {path} || echo missing'").strip()
+        return None if out == "missing" else int(out)
+
     def last_seq(self):
         events = self.read()
         return events[-1]["seq"] if events else -1

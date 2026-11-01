@@ -92,6 +92,23 @@ def kill(adb, timeout=10.0):
         time.sleep(0.2)
 
 
+def kill_cached(adb, timeout=10.0):
+    """Ends the app's process once the system counts it cached, without root or run-as.
+
+    For a locked user, where run-as may fail: it changes into the app's
+    credential protected directory. `am kill` only ends a process the system
+    considers safe to kill: right after a receiver finished it may not be
+    cached yet, so this retries; a bound service or a running receiver keeps it
+    alive, which times out. It doesn't stop the package.
+    """
+    end = time.time() + timeout
+    while (process := pid(adb)) is not None:
+        device_state.shell(adb, f"am kill {PACKAGE}")
+        if time.time() >= end:
+            raise TimeoutError(f"am kill didn't end the app's process {process}, is it bound or running a receiver?")
+        time.sleep(0.5)
+
+
 def force_stop(adb):
     device_state.shell(adb, f"am force-stop {PACKAGE}")
 

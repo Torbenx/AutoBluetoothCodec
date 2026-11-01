@@ -62,8 +62,8 @@ which phones may be rebooted, since a reboot ends at the lock screen.
 
 | Class | `testbed.yaml` | Lock screen | Reboot tests |
 | --- | --- | --- | --- |
-| Pure test device | `pure_test_device: true` | None by default. C14 and C15 set the PIN 0000 and clear it again | C7, C14, C15 |
-| Personal phone | `lock_password: "…"`, quoted | Its own; the password is only typed, never set or cleared | C14, C15 |
+| Pure test device | `pure_test_device: true` | None by default. C14 to C16 set the PIN 0000 and clear it again | C7, C14, C15, C16 |
+| Personal phone | `lock_password: "…"`, quoted | Its own; the password is only typed, never set or cleared | C14, C15, C16 |
 | Unknown password | neither | Its own | none |
 
 The suite only ever sets or clears the PIN 0000, with two hardcoded commands
@@ -82,7 +82,7 @@ with the phone's lock screen is a capability:
 | --- | --- | --- | --- |
 | Switch the phone's Bluetooth | API 29+, or root (`su`) on API 28, where the shell isn't allowed to | The testbed itself; a non-rooted API 28 phone can't take part | all |
 | No lock screen | A pure test device | C7: with a secure lock screen the app can't run after a reboot until the phone is unlocked, because its storage stays encrypted until then | both Pixels |
-| A lock screen the suite can unlock | A pure test device or a known password | C14, C15: the phone is rebooted with a secure lock screen and unlocked by typing its PIN or password | all |
+| A lock screen the suite can unlock | A pure test device or a known password | C14, C15, C16: the phone is rebooted with a secure lock screen and unlocked by typing its PIN or password | all |
 | End the app's process like the system | `run-as … kill` on API 28 and 36; API 32 needs root, `run-as` can't see the process there | C1, C3, C4 | all |
 | LDAC | The codec capabilities of phone and headset, at run time | B3 | all, with the Qudelix |
 
@@ -173,6 +173,11 @@ Pitfalls the harness has to handle:
   doesn't end a process the companion service keeps bound. On the S24 the
   system binds the service again within about 3 s and delivers
   `onDeviceAppeared` again; on the API 32 Pixel it doesn't (C3).
+- Before the first unlock `run-as` may fail, since it changes into the
+  app's credential protected directory, and on API 32 SELinux denies its
+  `sigkill` anyway, so C16 ends the process with `am kill`, which only ends
+  a cached one. Once the
+  user is unlocked, `run-as` reads the app's device protected directory too.
 - Mobly calls `on_fail` after `teardown_test`, when the restore has already
   reset the app, so `BaselineTest` collects the artifacts in its teardown,
   before the restore. Mobly calls the teardown in a `finally` block, so the
@@ -338,12 +343,32 @@ does, never launched, force-stopped, after a reboot or after an update.
 | C12 | Doze and the `rare` and `restricted` standby buckets: still applied | all | | P3 |
 | C14 | After a reboot with a secure lock screen, A2DP connects before the first unlock: applied within 60 s of the unlock, without another connect; the time is recorded | all | a lock screen the suite can unlock | P1 |
 | C15 | After the same reboot, the system reports the device to the companion service: after the unlock, and when it next connects | 33+ | a lock screen the suite can unlock | P1 |
+| C16 | After the same reboot, the device goes away and the app's process ends before the unlock: the unlock merges nothing, opening the main screen without a device merges the locked events | all | a lock screen the suite can unlock | P1 |
 
-C7, C14 and C15 are in `tests/reboot_test.py`, which runs last (6.9). C14
-and C15 check that the scenario happened: the user is still `RUNNING_LOCKED`
-(`am get-started-user-state`) when A2DP has connected. If A2DP doesn't
-connect before the unlock, they reconnect the headset once; the connect
-fixture's last resort, the Bluetooth settings, is behind the lock screen.
+C7, C14, C15 and C16 are in `tests/reboot_test.py`, which runs last (6.9).
+C14 to C16 check that the scenario happened: the user is still
+`RUNNING_LOCKED` (`am get-started-user-state`) when A2DP has connected. If
+A2DP doesn't connect before the unlock, they reconnect the headset once; the
+connect fixture's last resort, the Bluetooth settings, is behind the lock
+screen.
+
+C14 usually merges the log through the receiver the log registers for the
+unlock, since the process that applied the codec still runs then. C16
+covers the main screen's merge: the codec is applied before the unlock,
+dumpsys shows it, and the process is ended with `am kill`, which only
+succeeds once the receiver's broadcast is finished, so after its operation
+is resolved and written. Then the device goes away, and the process the
+disconnect's broadcast starts is ended too. Since API 35 the phone is
+rebooted once more instead, still locked: the companion device manager
+keeps the presence events it holds back in memory, and queues an
+appearance for a BLE device lost while locked, which would start the
+process at the unlock. After the unlock no process may start for 15 s, the log stays
+unchanged and the device protected file still has the locked events. Its
+lines will be encrypted, so only its line count is checked. Opening the
+main screen with no device connected then merges that many events, dated
+before the unlock, the receiver's operation resolved `CODEC_VERIFIED`, and
+deletes the file. If a process starts at the unlock, the failure names
+why, from `am_proc_start`.
 
 Before the first unlock the app's credential protected storage is
 encrypted. The manifest receiver and the companion service are direct boot
@@ -352,11 +377,11 @@ protected storage, and the log keeps its events in a device protected file
 until the unlock merges them (K9). Per API level, from the AOSP sources and
 the runs on the testbed:
 
-| API | Before the unlock | At the unlock | C14 | C15 |
-| --- | --- | --- | --- | --- |
-| 28–32 | The receiver applies the codec when A2DP connects | The log merges the locked events | passes (28, 32) | – (no service before 33, D27) |
-| 33–34 | The receiver applies it; the service is found while locked and told when the device appears | – | not on the testbed | not on the testbed |
-| 35–36 | The receiver applies it; all presence events held back | Replayed: the service is bound | passes (36) | passes (36) |
+| API | Before the unlock | At the unlock | C14 | C15 | C16 |
+| --- | --- | --- | --- | --- | --- |
+| 28–32 | The receiver applies the codec when A2DP connects | The log merges the locked events | passes (28, 32) | – (no service before 33, D27) | passes (28, 32) |
+| 33–34 | The receiver applies it; the service is found while locked and told when the device appears | – | not on the testbed | not on the testbed | not on the testbed |
+| 35–36 | The receiver applies it; all presence events held back | Replayed: the service is bound | passes (36) | passes (36) | passes (36), with the second reboot |
 
 Without direct boot awareness, the manager looked the service up while the
 user was locked and kept the empty result on API 31–33, and nothing applied
@@ -871,9 +896,9 @@ needs the ones before it unless it says otherwise.
     `qudelix-phone` on the API 28 Pixel. Every P2 test passes, or is not applicable for its API level or
     headset, on every phone. Every case of the manual test records is
     automated, and they're deleted (D10).
-13. **Locked reboot**: the lock screen classes (D24–D26), C14 and C15. Both
-    pass where they apply since the receiver and the service are direct boot
-    aware.
+13. **Locked reboot**: the lock screen classes (D24–D26), C14, C15 and C16.
+    C14 and C15 pass where they apply since the receiver and the service are
+    direct boot aware.
 14. **P3**; screenshot tests (V12) after the UI polish (D5); the release smoke
     test once R8 is enabled.
 
@@ -1074,6 +1099,38 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   device only after it had gone and come back. Mobly's logcat misses the
   start of a boot, the Pixel's buffer is overwritten by then. This led to
   D27.
+- The first runs of C16 on both Pixels: passed. The receiver had applied the
+  codec by the time A2DP was seen connected, while locked, and the first
+  `am kill` ended the process. Nothing started it again before
+  or in the 15 s after the unlock, and the log stayed unchanged until the main
+  screen opened; the 5 locked events were merged by the first read after
+  `am start -W` returned. On
+  API 32 `run-as` can't end the process: SELinux denies `runas_app` the
+  `sigkill` on `untrusted_app`, while reading the app's device protected
+  files works.
+- The first run of C16 on the S24 failed twice over. The test turned the
+  headset off as soon as dumpsys showed the preferred codec, 0.5 s after the
+  receiver set it and before it verified it, so the operation resolved
+  `NOT_CONNECTED`. C16 now ends the process before the device goes away,
+  which waits for the receiver; both Pixels pass with it. And the system
+  started the app's process at the unlock: while locked, the companion
+  device manager held back `onBluetoothCompanionDeviceConnected` and
+  `onBleCompanionDeviceLost` ("Notify the application when the phone is
+  unlocked"), and 0.2 s after `onUserUnlocking` it started the process for
+  the service, which logged `DEVICE_APPEARED` (BLE) for the headset that
+  had been off for about 13 s. No `DEVICE_DISAPPEARED` followed until the
+  artifacts were collected, about 15 s later. So on API 36 the unlock merges the log whenever the device was
+  seen while locked, and C16's scenario can't happen there. The AOSP source
+  (`DevicePresenceProcessor`, main) explains it: the held-back events are
+  kept in `mPendingDevicePresenceEvents`, in memory; a Bluetooth disconnect
+  removes the queued connect, but `onBleCompanionDeviceLost` queues
+  `EVENT_BLE_APPEARED`, so the unlock reports a device that is gone, and no
+  disappearance follows. Since API 35 C16 reboots again, still locked,
+  after the device is gone, which drops the queue. With that C16 passed on
+  the S24: the user was still `RUNNING_LOCKED` after the second boot,
+  nothing started the process at the unlock, and the main screen merged the
+  5 events of the first boot. The first `am kill` there needed a second try,
+  0.6 s later.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 

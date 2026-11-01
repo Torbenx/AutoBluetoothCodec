@@ -1,5 +1,5 @@
-"""L4 tests that reboot the phone: C7 without a lock screen, C14 and C15 with a secure lock screen that is
-still locked when A2DP connects.
+"""L4 tests that reboot the phone: C7 without a lock screen, C14, C15 and C16 with a secure lock screen that
+is still locked when A2DP connects.
 
 Before the first unlock after a boot, the app's credential protected storage
 is encrypted. Its manifest receiver and companion service are direct boot
@@ -20,6 +20,7 @@ import time
 from mobly import asserts
 
 from lib import app
+from lib import app_log
 from lib import baseline
 from lib import bt_oracle
 from lib import device_state
@@ -27,6 +28,7 @@ from lib import lock_screen
 from lib import sim_helper
 from lib.bt_oracle import same_format
 from tests.cold_start_test import APPEARANCE_TIMEOUT
+from tests.cold_start_test import APPLY_TIMEOUT
 from tests.cold_start_test import ColdStartBase
 
 # How long after the unlock the preferred codec may take, measured from the unlock
@@ -35,6 +37,10 @@ UNLOCK_APPLY_TIMEOUT = 60.0
 UNLOCK_APPEARANCE_TIMEOUT = 60.0
 # How long the SIMs may take to unlock with their stored PINs, measured from the storage's unlock
 SIM_UNLOCK_TIMEOUT = 60.0
+# How long after the unlock nothing may start the app's process, which would merge the log
+UNLOCK_IDLE = 15.0
+# How long the main screen may take to merge the log, measured from its start
+MERGE_TIMEOUT = 15.0
 
 
 class RebootTest(ColdStartBase):
@@ -122,6 +128,22 @@ class RebootTest(ColdStartBase):
         dumped = bt_oracle.active_codec(self.adb, self.address)
         self.ad.log.info("A2DP connected before the unlock with %s, the preferred codec is %s", dumped, codec)
         return mark
+
+    def wait_applied_while_locked(self, codec, timeout=APPLY_TIMEOUT):
+        """Waits until A2DP uses [codec] while the user is still locked. The log can't be read before
+        the unlock, so dumpsys decides."""
+        end = time.time() + timeout
+        while not same_format(codec, dumped := bt_oracle.active_codec(self.adb, self.address)):
+            if time.time() >= end:
+                asserts.fail(f"{codec} wasn't applied before the unlock within {timeout:.0f} s, dumpsys shows {dumped}")
+            time.sleep(1)
+        asserts.assert_equal(lock_screen.RUNNING_LOCKED, lock_screen.user_state(self.adb),
+                             "the user was unlocked before the codec was applied")
+
+    def process_starts(self):
+        """Why the system started the app's process since the boot, from am_proc_start in the events buffer."""
+        out = device_state.shell(self.adb, "logcat -d -b events -s am_proc_start", timeout=30)
+        return [line.split("am_proc_start: ", 1)[-1] for line in out.splitlines() if f",{app.PACKAGE}," in line]
 
     def appearance(self, after, timeout):
         """The first DEVICE_APPEARED after seq [after] within [timeout] s, or None."""
@@ -218,3 +240,75 @@ class RebootTest(ColdStartBase):
                    if event is None]
         asserts.assert_equal([], missing, f"the system didn't report the device to the companion service; "
                                           f"events since the connect: {[e['type'] for e in events]}")
+
+    def test_c16_main_screen_merges_the_locked_log(self):
+        """After the same locked reboot, the device goes away and the app's process ends before the
+        unlock: the unlock doesn't merge the log, opening the main screen without a device does.
+
+        Without a process at the unlock, no receiver of the log is registered for
+        it, and with the device gone the system has no reason to start one. The
+        main screen logs nothing without a connected device, so what merges the
+        log is EventLog.get() in its onCreate.
+
+        Since API 35 the companion device manager holds the presence events back
+        until the unlock, and for a BLE device lost while locked it queues an
+        appearance, which starts the process at the unlock. It keeps them in
+        memory only, so there the phone is rebooted again, still locked, once the
+        device is gone; that ends the process too.
+        """
+        self.require_lock_screen()
+        codec = self.preferred_codec()
+        mark = self.reboot_locked(codec)
+        self.wait_applied_while_locked(codec)
+        # The receiver's broadcast is finished once its operation is resolved and written, and only
+        # then does am kill end the process. dumpsys shows the codec before it's verified, and the
+        # device going away first would resolve the operation NOT_CONNECTED
+        app.kill_cached(self.adb, timeout=30)
+        self.headset_off()
+        if self.sdk >= 35:
+            sim_helper.unattended_reboot(self.ad)
+        else:
+            # The disconnect is broadcast to the manifest receiver too, which starts the process again
+            # and logs nothing for it
+            time.sleep(5)
+            app.kill_cached(self.adb)
+        time.sleep(3)
+        if app.is_running(self.adb):
+            asserts.fail(f"the system started the app's process again: {self.process_starts()}")
+        asserts.assert_equal(lock_screen.RUNNING_LOCKED, lock_screen.user_state(self.adb),
+                             "the user was unlocked before the app's process ended")
+        # The phone's clock, in ms like the log. Rounded up, the events of the second it's read in count as before
+        locked_until = (int(device_state.shell(self.adb, "date +%s")) + 1) * 1000
+        self.unlock()
+        time.sleep(UNLOCK_IDLE)
+        if app.is_running(self.adb):
+            asserts.fail(f"the app's process started after the unlock, which merges the log: {self.process_starts()}")
+        asserts.assert_equal(mark, self.log.last_seq(), "the log changed without the app's process")
+        lines = self.log.locked_line_count()
+        # At least the receiver's operation: its trigger, the codec it set and its verification
+        asserts.assert_true(lines is not None and lines >= 3, f"the device protected file has {lines} lines")
+        connected = [d.address for d in bt_oracle.read(self.adb).devices if d.connected]
+        asserts.assert_equal([], connected, "a device is connected, the main screen would log its codec")
+
+        app.launch(self.adb)
+        end = time.time() + MERGE_TIMEOUT
+        while True:
+            merged, remaining = self.log.events_after(mark), self.log.locked_line_count()
+            # The device protected file is deleted once the merged log is written
+            if len(merged) >= lines and remaining is None:
+                break
+            if time.time() >= end:
+                asserts.fail(f"opening the main screen didn't merge the log within {MERGE_TIMEOUT:.0f} s: "
+                             f"{len(merged)} of {lines} events, the device protected file has {remaining} lines")
+            time.sleep(1)
+        app.go_home(self.adb)
+        # The merge appends the device protected events first, any interruptions follow them
+        locked = merged[:lines]
+        later = [e["type"] for e in locked if e["time"] > locked_until]
+        asserts.assert_equal([], later, "merged events that were logged after the unlock")
+        ops = app_log.operations(locked)
+        self.ad.log.info("C16 on API %d: %d events merged when the main screen opened: %s",
+                         self.sdk, lines, self.describe(ops))
+        asserts.assert_true(
+            any(op.trigger.get("message") == "manifest receiver" and op.resolution == "CODEC_VERIFIED" for op in ops),
+            f"the receiver's operation before the unlock isn't merged: {self.describe(ops)}")

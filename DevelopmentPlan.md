@@ -15,7 +15,7 @@
    * Profile Log Activity (Done)
    * Setup testing using Mobly (Done)
    * Add open source licences somewhere (Done)
-   * Applying the codec after a restart when A2DP connects before the first unlock (Done: the receiver and the service are direct boot aware, C14 and C15).
+   * Applying the codec after a restart when A2DP connects before the first unlock (Done: the receiver and the service are direct boot aware, C14 and C15; C16 for the main screen merging the locked log).
    * Disable the companion service on API 31-32, link there only for the auto revoke exemption (Done, D27 in mobly_tests/TestConcept.md).
 
 2. Polish UI
