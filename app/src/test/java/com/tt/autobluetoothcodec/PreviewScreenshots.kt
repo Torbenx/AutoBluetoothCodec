@@ -112,6 +112,7 @@ internal class PreviewScreenshots(private val shot: Shot) {
         }
 
         private val outputDir = File("build/outputs/previews")
+
     }
 
     @Test
@@ -131,7 +132,11 @@ internal class PreviewScreenshots(private val shot: Shot) {
         }
     }
 
-    /** Draws the windows, the activity's and those of dialogs and menus, onto one bitmap. */
+    /**
+     * Draws the windows, the activity's and those of dialogs and menus, onto one bitmap. Each window is rendered
+     * like on a phone, with Robolectric's hardware renderer, since drawing a view onto a canvas leaves out the
+     * shadows of elevated surfaces.
+     */
     @Suppress("UNCHECKED_CAST")
     private fun captureWindows(): Bitmap {
         val globalClass = Class.forName("android.view.WindowManagerGlobal")
@@ -140,6 +145,10 @@ internal class PreviewScreenshots(private val shot: Shot) {
         val views = field<View>("mViews")
         val params = field<WindowManager.LayoutParams>("mParams")
         val root = views.first()
+        // Robolectric's HardwareRenderingScreenshot.takeScreenshot(View, Bitmap), which is internal to it
+        val renderHardware = Class.forName("org.robolectric.shadows.HardwareRenderingScreenshot")
+            .getDeclaredMethod("takeScreenshot", View::class.java, Bitmap::class.java)
+            .apply { isAccessible = true }
         val bitmap = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.drawColor(Color.WHITE)
@@ -151,14 +160,13 @@ internal class PreviewScreenshots(private val shot: Shot) {
             val location = IntArray(2)
             view.getLocationOnScreen(location)
             // Robolectric leaves dialogs at the top left, popups place themselves
-            if (param.gravity and Gravity.CENTER == Gravity.CENTER) {
+            if (param.gravity and Gravity.HORIZONTAL_GRAVITY_MASK == Gravity.CENTER_HORIZONTAL)
                 location[0] = (root.width - view.width) / 2
+            if (param.gravity and Gravity.VERTICAL_GRAVITY_MASK == Gravity.CENTER_VERTICAL)
                 location[1] = (root.height - view.height) / 2
-            }
-            canvas.save()
-            canvas.translate(location[0].toFloat(), location[1].toFloat())
-            view.draw(canvas)
-            canvas.restore()
+            val window = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            renderHardware.invoke(null, view, window)
+            canvas.drawBitmap(window, location[0].toFloat(), location[1].toFloat(), null)
         }
         return bitmap
     }
