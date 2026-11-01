@@ -13,12 +13,11 @@ Suites, in the order they run:
   reboot      L4 tests that reboot the phone, tests/reboot_test.py
 The journeys need the screen on, so they run before the tests that turn it
 off or reboot. The reboot tests run last: a reboot with a secure lock screen
-is the slowest, and on some API levels it leaves the companion device
-manager broken until the next reboot (D26).
+is the slowest.
 
-Build, than the the 'ui' suite on the phone <serial>:
+Build, then run the 'ui' suite on the phone <serial>:
   .venv/Scripts/python run_suite.py --build --suite ui --phone <serial>
-Build, than run all suites except smoke on all phones:
+Build, then run all suites except smoke on all phones:
   .venv/Scripts/python run_suite.py --build
 Run the 'test_j1_first_start' test (from the 'journeys' suite) and
 the entire 'bt_logic' suite with the current build:

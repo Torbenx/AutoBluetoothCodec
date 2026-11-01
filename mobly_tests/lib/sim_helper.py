@@ -16,6 +16,7 @@ with a PIN and an inactive eSIM).
 
 from lib import app
 from lib import device_state
+from lib import lock_screen
 
 # One state per slot, comma separated, like "LOADED,ABSENT". Empty on the API 28 Pixel, whose radio doesn't run
 SIM_STATE_PROPERTY = "gsm.sim.state"
@@ -68,11 +69,18 @@ def snippet_apk_path(adb):
 def unattended_reboot(ad):
     """Prepares the SIMs for an unattended reboot and reboots the phone [ad] with Mobly.
 
+    If the user is locked a plain reboot is performed without preparation. Any previous
+    preparation remains valid until the user is unlocked.
+
     Doesn't reboot if the SIMs couldn't be prepared: the lock screen would ask
     for a SIM PIN the suite doesn't know. Below API 30, which has no unattended
     reboot, only a phone without a SIM is rebooted. Doesn't wait for the SIMs.
     """
     adb = ad.adb
+    if lock_screen.user_state(adb) == lock_screen.RUNNING_LOCKED:
+        ad.reboot()
+        return
+
     if app.sdk(adb) < UNATTENDED_REBOOT_SDK:
         states = sim_states(adb)
         if any(state != ABSENT for state in states):

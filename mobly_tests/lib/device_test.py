@@ -198,7 +198,7 @@ class BaselineTest(DeviceTest):
 
     def reset_phone(self):
         """Undoes what a test changed outside the baseline, after the artifacts are collected and before
-        the repair. Nothing by default; the reboot tests clear the PIN and reboot again (D26)."""
+        the repair. Nothing by default; the reboot tests unlock the phone and clear the PIN (D26)."""
 
     def teardown_class(self):
         if self.leaks:

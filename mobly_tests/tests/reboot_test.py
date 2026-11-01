@@ -1,5 +1,5 @@
-"""L4 tests that reboot the phone: C7 without a lock screen, C14, C15 and C16 with a secure lock screen that
-is still locked when A2DP connects.
+"""L4 tests that reboot the phone: C7 without a lock screen, C14, C15 and C16
+with a secure lock screen that is still locked when A2DP connects.
 
 Before the first unlock after a boot, the app's credential protected storage
 is encrypted. Its manifest receiver and companion service are direct boot
@@ -11,8 +11,8 @@ TestConcept.md, below the C14 and C15 rows.
 Which phones are rebooted depends on their lock screen (D24): a pure test
 device gets the PIN 0000 for the locked reboot and loses it again, a
 personal phone's password is typed, and a phone whose password isn't known
-isn't rebooted. A locked reboot ends with a clean reboot (D26). Every
-reboot is an unattended one, so a SIM with a PIN unlocks by itself.
+isn't rebooted. Every reboot is an unattended one, so a SIM with a PIN
+unlocks by itself.
 """
 
 import time
@@ -61,7 +61,6 @@ class RebootTest(ColdStartBase):
     def setup_test(self):
         super().setup_test()
         self._pin_set = False
-        self._locked_reboot = False
         self._unlock_failed = False
 
     def require_lock_screen(self):
@@ -77,11 +76,15 @@ class RebootTest(ColdStartBase):
         wrong one. Tried once: a wrong password counts as a failed attempt,
         which brings lockout delays and, on some phones, a factory reset.
         """
-        # A pure test device has no PIN again after the clean reboot
+        # A pure test device only has a PIN during a locked reboot test
         secret = lock_screen.password(self.testbed, self.ad.serial) if lock_screen.has_credential(self.adb) else None
         try:
             lock_screen.verify(self.ad.serial, secret)
             self.wait_for_sims()
+            # The user and SIM unlocking can cause some lag as the phone catches up. In rare
+            # cases this caused the lock screen password to be typed before the UI was ready,
+            # failing the test.
+            time.sleep(5)
             lock_screen.unlock(self.adb, self.ad.serial, secret)
         except lock_screen.UnlockFailed as e:
             self._unlock_failed = True
@@ -110,7 +113,6 @@ class RebootTest(ColdStartBase):
             lock_screen.set_pin(self.adb, self.lock_class)
             self._pin_set = True
         mark = self.log.last_seq()
-        self._locked_reboot = True
         sim_helper.unattended_reboot(self.ad)
         asserts.assert_equal(lock_screen.RUNNING_LOCKED, lock_screen.user_state(self.adb),
                              "the user was unlocked without the lock screen, does the phone have a secure one?")
@@ -153,31 +155,20 @@ class RebootTest(ColdStartBase):
             return None
 
     def reset_phone(self):
-        """Clears the PIN and, after a locked reboot, reboots again with Bluetooth off (D26).
+        """Unlocks the phone if it's still locked and clears the PIN (D26).
 
-        Before the companion service was direct boot aware, the system kept
-        not finding it until the next reboot on API 31 to 33, and on 34 after a
-        BLE sighting. The clean reboot keeps the next test independent of what
-        the locked boot left. With Bluetooth off nothing appears before the
-        unlock.
+        On API 31 to 33, and on 34 after a BLE sighting, the system can't find
+        a companion service that isn't direct boot aware when it looks it up
+        while the user is locked, until the next reboot. The app's service is
+        direct boot aware, so the next test can run in the same boot.
         """
         if self._unlock_failed:
             asserts.abort_all(f"{self.ad.serial} is still locked")
-        if not (self._pin_set or self._locked_reboot):
-            return
         if not device_state.is_unlocked(self.adb) or lock_screen.user_state(self.adb) != lock_screen.RUNNING_UNLOCKED:
             self.unlock()
-        if self._locked_reboot:
-            device_state.set_bluetooth(self.adb, False)
         if self._pin_set:
             lock_screen.clear_pin(self.adb, self.lock_class)
             self._pin_set = False
-        if self._locked_reboot:
-            sim_helper.unattended_reboot(self.ad)
-            self.unlock()
-            self._locked_reboot = False
-            # The baseline's repair connects the headset
-            device_state.set_bluetooth(self.adb, True)
 
     def test_c7_after_a_reboot(self):
         """After a reboot, without opening the app: applied."""

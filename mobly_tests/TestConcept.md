@@ -352,6 +352,20 @@ A2DP doesn't connect before the unlock, they reconnect the headset once; the
 connect fixture's last resort, the Bluetooth settings, is behind the lock
 screen.
 
+Every reboot is an unattended one (`sim_helper.unattended_reboot`), so a
+SIM with a PIN unlocks by itself: the phone stores the SIM PINs before the
+reboot and enters them before the first unlock. A reboot while the user is
+still locked, C16's second one, is a plain reboot: the preparation of the
+first reboot stays valid until the unlock. Below API 30, which has no
+unattended reboot, only a phone without a SIM is rebooted. The unlock
+first unlocks the storage with `locksettings verify`, waits until every SIM
+is loaded or absent, waits another 5 s for the lock screen to catch up, and
+only then types the password; a password typed while the lock screen asks
+for a SIM PIN would count as a wrong SIM PIN.
+
+A test ends with the phone unlocked and, on a pure test device, the PIN
+cleared again; the next test runs in the same boot (D26).
+
 C14 usually merges the log through the receiver the log registers for the
 unlock, since the process that applied the codec still runs then. C16
 covers the main screen's merge: the codec is applied before the unlock,
@@ -592,6 +606,10 @@ disappears 7–8 s after its BLE advertisements stop. A Qudelix reconnect is a
 reboot; it answers on USB again after about 4 s. A timeout fails the test with
 the log tail and the current `dumpsys` state.
 
+The unlock after a reboot waits a fixed 5 s before typing the password:
+the lock screen has no state adb can poll for being ready to take it, and a password typed too early fails the unlock,
+which isn't retried (D24).
+
 ### 6.5 Log assertions
 
 `app_log.py` returns operations, not lines:
@@ -678,7 +696,8 @@ Datenschutz > Weitere Sicherheitseinstellungen, the secure setting
 `block_usb_lock`) is off: otherwise adb stays blocked after a reboot until
 the phone is unlocked, and the locked reboot tests can't see the phone before
 the unlock. It's on by default, and `settings put` refuses the key, so it's
-turned off by hand. Saving and restoring a phone's own app data,
+turned off by hand. A SIM with a PIN has had its PIN entered by hand once
+since the phone's last boot, so the unattended reboot can store it. Saving and restoring a phone's own app data,
 like the S24's, is outside the suite too (D7).
 
 1. Start `testbed_session.py` in one terminal.
@@ -1131,6 +1150,9 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   nothing started the process at the unlock, and the main screen merged the
   5 events of the first boot. The first `am kill` there needed a second try,
   0.6 s later.
+- In rare runs the unlock after a reboot typed the password before the lock
+  screen was ready for it, right after the storage and the SIMs had
+  unlocked, and the unlock failed. The unlock now waits 5 s before typing.
 - Recordings of `dumpsys bluetooth_manager` (status and A2DP sections) and of
   the companion device outputs from every phone are in `mobly_tests/testdata`.
 
@@ -1228,13 +1250,16 @@ Checked on 2026-10-27, while writing this concept and in the spike (step 1):
   `run_suite.py` passes only the lock screen class and the path of
   `testbed.yaml`; the password is read from it when it's typed, with a
   plain adb call, since Mobly's AdbProxy logs every command.
-- **D26** A test that rebooted with a secure lock screen ends with a clean
-  reboot: Bluetooth off, the PIN cleared on a pure test device, reboot,
-  unlock, Bluetooth on. On API 31–33, and on 34 after a BLE sighting, the
-  companion device manager doesn't find the service for the rest of a boot
-  in which the device appeared before the unlock, which would break C3 and
-  C5 in this run and the next. With Bluetooth off, nothing appears before
-  the unlock. The test images turn the swipe lock screen off at every boot,
+- **D26** A test that rebooted with a secure lock screen ends with the
+  phone unlocked and, on a pure test device, the PIN cleared; no clean
+  reboot follows. It used to: Bluetooth off, the PIN cleared, reboot,
+  unlock, Bluetooth on, because on API 31–33, and on 34 after a BLE
+  sighting, the companion device manager doesn't find a service that isn't
+  direct boot aware for the rest of a boot in which the device appeared
+  before the unlock, which broke C3 and C5 in this run and the next. The
+  service is direct boot aware now and disabled on 31–32 (D27), so the next
+  test runs in the boot the locked reboot left. On 33–34 this follows from
+  the AOSP sources; the testbed has no phone there. The test images turn the swipe lock screen off at every boot,
   so the suite needs no command for that. Their `locksettings set-disabled`
   at boot counts as a failed attempt on Android 9 and 12L while the PIN is
   set; the unlock right after resets the count.
