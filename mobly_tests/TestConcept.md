@@ -289,8 +289,8 @@ the UI polish. The same tests run on the JVM and on every phone
 | --- | --- | --- |
 | V1 | Permission screens: "Grant permission", and after a permanent denial the settings hint with "Open settings" | P2 |
 | V2 | Collapsed card: chips for codec, rate, size, LDAC adaptive or kbps; "Unsupported codec"; "No codec information" | P1 |
-| V3 | Status chip: "Preferred Codec" or the "Save As Preferred Codec" button, hidden when the codec is unreadable or unknown; saving passes the current codec | P1 |
-| V4 | Device menu: shown only with a preferred codec or a debug link; Restore only when the preferred codec isn't active; Delete; Unlink only in debug builds | P1 |
+| V3 | Collapsed card: the "Preferred Codec" chip after the codec's chips while the preferred codec is active, none when the codec is unreadable or unknown | P1 |
+| V4 | Expanded card's preferred codec actions, only what's available: a wide Save with nothing saved, "Active" and Clear while it's active, Save, Restore and Clear otherwise, Restore and Clear for an unknown codec; saving passes the current codec. On a small phone with the largest font the one-slot buttons only show their icons and keep their names (JVM only). The device menu only in debug builds, for unlinking a linked device | P1 |
 | V5 | Link prompt: shown when the codec is unreadable, or a link is required and a preferred codec exists (the API 34–35 state); both texts; the "can't link" text without the companion feature; Allow disabled while linking | P1 |
 | V6 | Expanded card and codec selection: chips enabled from the capabilities, the selected chip, the LDAC bitrate row. Choosing a codec keeps the current rate and size if the new codec supports them, otherwise takes the first supported ones, preferring the capability that supports both; the codec passed to the callback | P1 |
 | V7 | Several devices, long names | P3 |

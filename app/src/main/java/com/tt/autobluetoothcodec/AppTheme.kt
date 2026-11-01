@@ -11,21 +11,31 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
-/** Colors Material's color scheme doesn't have, for states like a codec that's the preferred one. */
+/**
+ * Colors Material's color scheme doesn't have: success for a codec that's the preferred one, and the green of
+ * restoring it, which leads there.
+ */
 @Immutable
 internal data class StatusColors(
     val successContainer: Color,
     val onSuccessContainer: Color,
+    val restoreContainer: Color,
+    val onRestoreContainer: Color,
 )
 
 private val lightStatusColors = StatusColors(
     successContainer = Color(0xFFE8F5E9),
-    onSuccessContainer = Color(0xFF388E3C),
+    // 4.6:1 on the container, readable as text
+    onSuccessContainer = Color(0xFF2E7D32),
+    restoreContainer = Color(0xFFC3EFC0),
+    onRestoreContainer = Color(0xFF002106),
 )
 
 private val darkStatusColors = StatusColors(
     successContainer = Color(0xFF1F3B27),
     onSuccessContainer = Color(0xFFA8D5B0),
+    restoreContainer = Color(0xFF1E5124),
+    onRestoreContainer = Color(0xFFB6F2B4),
 )
 
 private val LocalStatusColors = staticCompositionLocalOf { lightStatusColors }

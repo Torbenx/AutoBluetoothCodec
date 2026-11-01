@@ -120,16 +120,24 @@ internal val mainScreenStates = listOf(
     )),
     mainScene("LDAC bitrates and other codecs", state(
         device(ldac(bitrate = LDACCodecConfig.BITRATE_ADAPTIVE), name = "LDAC adaptive", address = "00:00:00:00:00:01"),
-        device(ldac(CodecConfig.SAMPLE_RATE_44100, CodecConfig.BITS_PER_SAMPLE_24, LDACCodecConfig.BITRATE_HIGH),
-            name = "LDAC 909 kbps", address = "00:00:00:00:00:02"),
+        // Four chips and the preferred one
+        ldac(CodecConfig.SAMPLE_RATE_44100, CodecConfig.BITS_PER_SAMPLE_24, LDACCodecConfig.BITRATE_HIGH).let {
+            device(it, preferred = it, name = "LDAC 909 kbps", address = "00:00:00:00:00:02")
+        },
         device(codec(CodecConfig.CODEC_TYPE_APTX_HD, CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24),
             name = "aptX HD", address = "00:00:00:00:00:03"),
         device(sbc(), name = "SBC", address = "00:00:00:00:00:04"),
     )),
+    mainScene("Expanded, nothing saved", state(device(), sony()), setOf(ADDRESS)),
     mainScene("Expanded, preferred codec active", state(device(preferred = ldac()), sony()), setOf(ADDRESS)),
     mainScene("Expanded, preferred codec differs",
         state(device(ldac(CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24), preferred = ldac()), sony(preferred = aac())),
         setOf(ADDRESS)),
+    // Only restoring and clearing, a codec this app doesn't know can't be saved
+    mainScene("Expanded, unsupported codec, preferred saved", state(
+        device(codec = null, android = AndroidCodecConfig(CODEC_TYPE_LC3, CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_16),
+            preferred = ldac()),
+    ), setOf(ADDRESS)),
     mainScene("Expanded, long name", state(
         device(name = LONG_NAME, preferred = ldac(CodecConfig.SAMPLE_RATE_48000)),
     ), setOf(ADDRESS)),

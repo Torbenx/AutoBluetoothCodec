@@ -40,14 +40,8 @@ internal class TextFitTest(private val case: Case) {
             PreviewScreenshots.Device("Small phone, font 200%", 360, 640, fontScale = 2f),
         )
 
-        /**
-         * Texts known to be cut off, not fixed yet: the device card's header squeezes its status button and cuts off
-         * long names, and with the largest font on a small phone the top bars' titles don't fit.
-         */
-        private val KNOWN_CUT_OFF = setOf(
-            "Save As Preferred Codec", "Preferred Codec", SampleData.LONG_NAME,
-            "Auto Bluetooth Codec", "Third-party licenses",
-        )
+        /** Texts known to be cut off, not fixed yet: with the largest font on a small phone the top bars' titles don't fit. */
+        private val KNOWN_CUT_OFF = setOf("Auto Bluetooth Codec", "Third-party licenses")
 
         @JvmStatic
         @Parameters(name = "{0}")

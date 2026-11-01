@@ -55,7 +55,6 @@ internal class PreviewScreenshots(private val shot: Shot) {
     companion object {
         private val PHONE = Device("Phone", 411, 891)
         private val PHONE_DARK = Device("Phone, dark", 411, 891, dark = true)
-        private val SMALL_PHONE_LARGE_FONT = Device("Small phone, font 200%", 360, 640, fontScale = 2f)
         private val CONFIGURATIONS = listOf(
             PHONE,
             PHONE_DARK,
@@ -74,7 +73,8 @@ internal class PreviewScreenshots(private val shot: Shot) {
         /** Scenes that need a tap or two, which the previews can't do. */
         private val interactions = listOf<Pair<Scene, Pair<String, Interaction>>>(
             Screens.main to ("App menu" to { onNodeWithTag("app_menu").performClick() }),
-            mainScreenStates.first { it.name == "Expanded, preferred codec differs" } to
+            // Only debug builds have the device menu, for unlinking
+            mainScreenStates.first { it.name == "No codec info, long name, debug options" } to
                 ("Device menu" to { onAllNodesWithTag("device_menu")[0].performClick() }),
             Screens.log to ("Share dialog" to { onNodeWithTag("share_log").performClick() }),
             Screens.log to ("Log menu" to { onNodeWithTag("log_menu").performClick() }),
@@ -105,16 +105,6 @@ internal class PreviewScreenshots(private val shot: Shot) {
             for (scene in logScreenStates)
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("3 Log states", scene, device))
-            for (scene in expandedPrototypes) {
-                // The colors in light and dark, the narrow layouts where the labels run out of space
-                val devices = if (scene.name.startsWith("Expanded, Narrow")) {
-                    listOf(Device("Small phone", 360, 640), Device("Phone, font 200%", 411, 891, fontScale = 2f), SMALL_PHONE_LARGE_FONT)
-                } else {
-                    listOf(PHONE, PHONE_DARK)
-                }
-                for (device in devices)
-                    shots.add(Shot("5 Prototypes", scene, device))
-            }
             for ((scene, interaction) in interactions)
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,

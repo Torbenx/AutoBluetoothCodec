@@ -2,7 +2,6 @@ package com.tt.autobluetoothcodec
 
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -108,66 +107,100 @@ class MainScreenTest {
     // V3
 
     @Test
-    fun saveAsPreferredPassesTheCurrentCodec() {
-        show(device(preferred = ldac(sampleRate = CodecConfig.SAMPLE_RATE_48000)))
-        compose.onNodeWithTag("status_chip").assertTextEquals("Save As Preferred Codec").assertIsEnabled().performClick()
-        assertEquals(listOf("savePreferred $ADDRESS LDAC, 96 kHz, 32-bit"), actions.calls)
-    }
-
-    @Test
-    fun theActivePreferredCodecIsALabel() {
+    fun theActivePreferredCodecShowsAChipAfterTheCodec() {
         show(device(preferred = ldac()))
-        compose.onNodeWithTag("status_chip").assertTextEquals("Preferred Codec").assertIsNotEnabled()
+        compose.onNodeWithTag("preferred_chip", useUnmergedTree = true).assertExists()
+        text("Preferred Codec").assertExists()
     }
 
     @Test
-    fun noStatusChipForAnUnreadableOrUnknownCodec() {
+    fun noChipWithoutTheActivePreferredCodec() {
         show(state(
-            device(statusReadable = false, codec = null, android = null, address = ADDRESS),
+            device(address = ADDRESS),
+            device(preferred = codec(CodecConfig.CODEC_TYPE_AAC, CodecConfig.SAMPLE_RATE_44100, CodecConfig.BITS_PER_SAMPLE_16),
+                name = "Other", address = "AA:BB:CC:DD:EE:01"),
         ))
-        compose.onNodeWithTag("status_chip").assertDoesNotExist()
+        compose.onNodeWithTag("preferred_chip", useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
-    fun noStatusChipForAnUnknownCodec() {
-        show(device(codec = null, android = AndroidCodecConfig(7)))
-        compose.onNodeWithTag("status_chip").assertDoesNotExist()
+    fun noChipForAnUnreadableOrUnknownCodec() {
+        show(state(
+            device(statusReadable = false, codec = null, android = null, preferred = ldac()),
+            device(codec = null, android = AndroidCodecConfig(7), preferred = ldac(), name = "Other", address = "AA:BB:CC:DD:EE:01"),
+        ))
+        compose.onNodeWithTag("preferred_chip", useUnmergedTree = true).assertDoesNotExist()
     }
 
     // V4
 
+    /** One of the expanded card's preferred codec actions, scrolled into view. */
+    private fun action(tag: String) = compose.onNodeWithTag(tag).performScrollTo()
+
     @Test
-    fun noMenuWithoutPreferredCodec() {
+    fun withNothingSavedOnlySaveIsOffered() {
         show(device())
-        compose.onNodeWithTag("device_menu").assertDoesNotExist()
+        expand()
+        compose.onNodeWithTag("restore_preferred").assertDoesNotExist()
+        compose.onNodeWithTag("clear_preferred").assertDoesNotExist()
+        action("save_preferred").performClick()
+        assertEquals(listOf("savePreferred $ADDRESS LDAC, 96 kHz, 32-bit"), actions.calls)
     }
 
     @Test
-    fun menuRestoresAndDeletesTheInactivePreferredCodec() {
+    fun whileActiveThePreferredCodecCanOnlyBeCleared() {
+        show(device(preferred = ldac()))
+        expand()
+        compose.onNodeWithTag("preferred_active", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("save_preferred").assertDoesNotExist()
+        compose.onNodeWithTag("restore_preferred").assertDoesNotExist()
+        action("clear_preferred").performClick()
+        assertEquals(listOf("deletePreferred $ADDRESS"), actions.calls)
+    }
+
+    @Test
+    fun aDifferentPreferredCodecCanBeReplacedRestoredAndCleared() {
         val preferred = codec(CodecConfig.CODEC_TYPE_AAC, CodecConfig.SAMPLE_RATE_44100, CodecConfig.BITS_PER_SAMPLE_16)
         show(device(preferred = preferred))
-        compose.onNodeWithTag("device_menu").performClick()
-        compose.onNodeWithTag("delete_preferred").assertExists()
-        compose.onNodeWithTag("unlink_device").assertDoesNotExist()
-        compose.onNodeWithTag("restore_preferred").performClick()
-        compose.onNodeWithTag("device_menu").performClick()
-        compose.onNodeWithTag("delete_preferred").performClick()
-        assertEquals(listOf("restorePreferred $ADDRESS AAC, 44.1 kHz, 16-bit", "deletePreferred $ADDRESS"), actions.calls)
+        expand()
+        compose.onNodeWithTag("preferred_active").assertDoesNotExist()
+        action("save_preferred").performClick()
+        action("restore_preferred").performClick()
+        action("clear_preferred").performClick()
+        assertEquals(listOf(
+            "savePreferred $ADDRESS LDAC, 96 kHz, 32-bit",
+            "restorePreferred $ADDRESS AAC, 44.1 kHz, 16-bit",
+            "deletePreferred $ADDRESS",
+        ), actions.calls)
     }
 
     @Test
-    fun menuOffersNoRestoreWhileThePreferredCodecIsActive() {
+    fun anUnknownCodecCantBeSavedButThePreferredOneRestored() {
+        show(device(codec = null, android = AndroidCodecConfig(7), preferred = ldac()))
+        expand()
+        compose.onNodeWithTag("save_preferred").assertDoesNotExist()
+        action("restore_preferred").performClick()
+        action("clear_preferred").assertExists()
+        assertEquals(listOf("restorePreferred $ADDRESS LDAC, 96 kHz, 32-bit"), actions.calls)
+    }
+
+    @Test
+    fun noPreferredCodecActionsForAnUnknownCodecWithoutOne() {
+        show(device(codec = null, android = AndroidCodecConfig(7)))
+        expand()
+        compose.onNodeWithTag("preferred_actions").assertDoesNotExist()
+    }
+
+    @Test
+    fun onlyDebugBuildsHaveTheDeviceMenu() {
         show(device(preferred = ldac()))
-        compose.onNodeWithTag("device_menu").performClick()
-        compose.onNodeWithTag("restore_preferred").assertDoesNotExist()
-        compose.onNodeWithTag("delete_preferred").assertExists()
+        compose.onNodeWithTag("device_menu").assertDoesNotExist()
     }
 
     @Test
     fun debugBuildsCanUnlink() {
         show(device(), showDevelopmentOptions = true)
         compose.onNodeWithTag("device_menu").performClick()
-        compose.onNodeWithTag("delete_preferred").assertDoesNotExist()
         compose.onNodeWithTag("unlink_device").performClick()
         assertEquals(listOf("unlink $ADDRESS"), actions.calls)
     }

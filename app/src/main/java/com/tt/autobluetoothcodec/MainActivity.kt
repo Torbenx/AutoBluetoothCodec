@@ -27,32 +27,36 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColor
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Transition
-import androidx.compose.animation.core.animateDp
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -62,10 +66,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -75,13 +83,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -573,7 +586,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
 @Composable
-internal fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
+private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
     val color = if (selected) {
         MaterialTheme.colorScheme.primary
     } else {
@@ -598,85 +611,173 @@ internal fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, click
 }
 
 @Composable
-internal fun ActiveConfigChip(text: String) {
+private fun ActiveConfigChip(text: String) {
     ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
-internal data class StatusChipColors(
-    val labelBackgroundColor: Color,
-    val labelTextColor: Color,
-    val buttonBackgroundColor: Color,
-    val buttonTextColor: Color
-)
-
+/** The chip of the collapsed card that says the preferred codec is active, after the codec's chips. */
 @Composable
-internal fun statusChipColors(
-    labelBackgroundColor: Color,
-    labelTextColor: Color,
-    buttonBackgroundColor: Color = MaterialTheme.colorScheme.primaryContainer,
-    buttonTextColor: Color = MaterialTheme.colorScheme.onPrimaryContainer
-): StatusChipColors {
-    return StatusChipColors(labelBackgroundColor, labelTextColor, buttonBackgroundColor, buttonTextColor)
-}
-
-@Composable
-internal fun StatusChip(
-    text: String,
-    colors: StatusChipColors,
-    isButton: Boolean,
-    onButtonClick: () -> Unit
-) {
-    val transition = updateTransition(isButton, "buttonState")
-    val duration: @Composable (Transition.Segment<Boolean>.() -> Int) = {
-        when {
-            false isTransitioningTo true -> 500
-            else -> 500
+private fun PreferredChip() {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = AppColors.status.successContainer,
+        contentColor = AppColors.status.onSuccessContainer,
+        modifier = Modifier.testTag("preferred_chip")
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Preferred Codec", style = MaterialTheme.typography.labelLarge)
         }
     }
+}
 
-    val backgroundColor by transition.animateColor(
-        label = "backgroundColor",
-        transitionSpec = { tween(duration()) }
-    ) { state -> if (state) colors.buttonBackgroundColor else colors.labelBackgroundColor }
+/** What can be done with a device's preferred codec. */
+private enum class PreferredAction(val label: String, val icon: ImageVector, val tag: String) {
+    SAVE("Save", Icons.Default.Star, "save_preferred"),
+    RESTORE("Restore", Icons.Default.Refresh, "restore_preferred"),
+    CLEAR("Clear", Icons.Default.Delete, "clear_preferred"),
+}
 
-    val textColor by transition.animateColor(
-        label = "textColor",
-        transitionSpec = { tween(duration()) }
-    ) { state -> if (state) colors.buttonTextColor else colors.labelTextColor }
+/** An action, or the "Active" label if [action] is null, taking [slots] of the three slots of the row. */
+private class PreferredSlot(val action: PreferredAction?, val slots: Int)
 
-    val cornerRadius by transition.animateDp(
-        label = "cornerRadius",
-        transitionSpec = { tween(duration()) }
-    ) { state -> if (state) 20.dp else 8.dp }
+/**
+ * Only what's available, so no button is ever disabled: Save across the row while nothing is saved, the "Active"
+ * label across two slots and Clear while the preferred codec is active, and otherwise Save, Restore and Clear.
+ */
+private fun preferredSlots(device: DeviceData): List<PreferredSlot> {
+    val current = device.codecConfig
+    val preferred = device.preferredConfig
+    return when {
+        preferred == null -> if (current != null) listOf(PreferredSlot(PreferredAction.SAVE, 3)) else emptyList()
+        preferred == current -> listOf(PreferredSlot(null, 2), PreferredSlot(PreferredAction.CLEAR, 1))
+        // A codec unknown to this app can't be saved
+        current == null -> listOf(PreferredSlot(PreferredAction.RESTORE, 2), PreferredSlot(PreferredAction.CLEAR, 1))
+        else -> PreferredAction.entries.map { PreferredSlot(it, 1) }
+    }
+}
 
-    val horizontalPadding = if (isButton) 24.dp else 16.dp
+/** The size of the icons in the preferred codec's row, 18 dp at the normal font size, growing with the labels. */
+@Composable
+private fun preferredIconSize(): Dp =
+    with(LocalDensity.current) { (MaterialTheme.typography.labelLarge.fontSize * (18f / 14f)).toDp() }
 
-    val verticalPadding = if (isButton) 16.dp else 6.dp
+/** The icon and the label of an action, or just the icon, which is then as tall as the label would be. */
+@Composable
+private fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
+    val style = MaterialTheme.typography.labelLarge
+    Row(
+        Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = if (showLabel) null else label, modifier = Modifier.size(preferredIconSize()))
+        if (showLabel) {
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = style, maxLines = 1)
+        } else {
+            Text("", style = style)
+        }
+    }
+}
 
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+/** A tonal button: Save in the theme's color, Restore in green and Clear in red. Without its label it has a tooltip. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val (container, content) = when (action) {
+        PreferredAction.SAVE -> scheme.primaryContainer to scheme.onPrimaryContainer
+        PreferredAction.RESTORE -> AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
+        PreferredAction.CLEAR -> scheme.errorContainer to scheme.onErrorContainer
+    }
+    val button = @Composable {
         Surface(
-            shape = RoundedCornerShape(cornerRadius),
-            color = backgroundColor,
-            onClick = onButtonClick,
-            enabled = isButton,
-            modifier = Modifier
-                .testTag("status_chip")
-                .animateContentSize(
-                    animationSpec = tween(500),
-                    alignment = Alignment.CenterEnd
-                )
+            onClick = onClick,
+            shape = CircleShape,
+            color = container,
+            contentColor = content,
+            modifier = modifier.semantics { role = Role.Button }.testTag(action.tag)
         ) {
-            Text(
-                text,
-                Modifier
-                    .animateContentSize(
-                        animationSpec = tween(500),
-                        alignment = Alignment.Center
-                    )
-                    .padding(horizontal = horizontalPadding, vertical = verticalPadding),
-                color = textColor,
-                style = MaterialTheme.typography.labelLarge
-            )
+            PreferredContent(action.label, action.icon, showLabel)
+        }
+    }
+    if (showLabel) {
+        button()
+    } else {
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text(action.label) } },
+            state = rememberTooltipState()
+        ) {
+            button()
+        }
+    }
+}
+
+/** Says that the preferred codec is active, shaped and colored like the collapsed card's chip. */
+@Composable
+private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = AppColors.status.successContainer,
+        contentColor = AppColors.status.onSuccessContainer,
+        modifier = modifier.testTag("preferred_active")
+    ) {
+        PreferredContent("Active", Icons.Default.Check, showLabel)
+    }
+}
+
+/**
+ * The expanded card's preferred codec section, a row of three equal slots, at most 420 dp wide. When the labels of
+ * three buttons don't fit in a third of the row, on small phones or with large fonts, the one-slot buttons only show
+ * their icons; Save and "Active", which are wider, keep their labels if those fit. The row never wraps, so the card
+ * keeps its height whatever is available.
+ */
+@Composable
+private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
+    val slots = preferredSlots(device)
+    if (slots.isEmpty())
+        return
+    Column {
+        Spacer(Modifier.height(16.dp))
+        Text("Preferred Codec", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        BoxWithConstraints(Modifier.widthIn(max = 420.dp).fillMaxWidth().testTag("preferred_actions")) {
+            val gap = 8.dp
+            val third = (maxWidth - gap * 2) / 3
+            val measurer = rememberTextMeasurer()
+            val style = MaterialTheme.typography.labelLarge
+            val density = LocalDensity.current
+            // The icon, its gap and the padding on both sides
+            val around = preferredIconSize() + 8.dp + 32.dp
+            fun fits(label: String, width: Dp) =
+                with(density) { measurer.measure(label, style, softWrap = false).size.width.toDp() } + around <= width
+            // Decided for all three, so a button doesn't lose its label when another one appears
+            val thirdsFit = PreferredAction.entries.all { fits(it.label, third) }
+            Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
+                for (slot in slots) {
+                    val width = third * slot.slots + gap * (slot.slots - 1)
+                    val action = slot.action
+                    val showLabel = thirdsFit || (slot.slots > 1 && fits(action?.label ?: "Active", width))
+                    val modifier = Modifier.width(width)
+                    if (action == null) {
+                        PreferredActiveLabel(showLabel, modifier)
+                    } else {
+                        PreferredActionButton(action, showLabel, modifier) {
+                            when (action) {
+                                PreferredAction.SAVE -> device.codecConfig?.let { actions.savePreferred(device.address, it) }
+                                PreferredAction.RESTORE -> device.preferredConfig?.let { actions.restorePreferred(device.address, it) }
+                                PreferredAction.CLEAR -> actions.deletePreferred(device.address)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -778,7 +879,7 @@ private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @Cod
 }
 
 @Composable
-internal fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
+private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
     Column {
         val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
         ConfigSelectRow(
@@ -892,31 +993,20 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
         enabled = true
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
+            // The name has the header to itself, the preferred codec is below the codec
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.height(48.dp)
+                modifier = Modifier.heightIn(min = 48.dp)
             ) {
-                Text(device.name, style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.weight(1f).defaultMinSize(minWidth = 8.dp))
-
-                val preferredConfig = device.preferredConfig
-                val currentConfig = device.codecConfig
-                val isPreferredActive = preferredConfig != null && preferredConfig == currentConfig
-
-                // A codec unknown to this app can't be saved as preference
-                if (device.statusReadable && currentConfig != null) {
-                    StatusChip(
-                        if (isPreferredActive) "Preferred Codec" else "Save As Preferred Codec",
-                        statusChipColors(
-                            labelBackgroundColor = AppColors.status.successContainer,
-                            labelTextColor = AppColors.status.onSuccessContainer
-                        ),
-                        isButton = !isPreferredActive,
-                        onButtonClick = { actions.savePreferred(device.address, currentConfig) }
-                    )
-                }
-                if (preferredConfig != null || (state.showDevelopmentOptions && device.associated)) {
-                    DeviceMenu(device, isPreferredActive, state.showDevelopmentOptions, actions)
+                Text(
+                    device.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (state.showDevelopmentOptions && device.associated) {
+                    DeviceMenu(device, actions)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -955,23 +1045,30 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                                     ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
                         }
                     }
+                    // Last, so the codec's chips stay where they are when it comes and goes
+                    if (device.preferredConfig == config) {
+                        PreferredChip()
+                    }
                 }
             }
             AnimatedVisibility(extended && device.statusReadable) {
-                CodecConfigSelection(
-                    device,
-                    onConfigChange = { actions.setCodec(device.address, it) }
-                )
+                Column {
+                    CodecConfigSelection(
+                        device,
+                        onConfigChange = { actions.setCodec(device.address, it) }
+                    )
+                    PreferredCodecActions(device, actions)
+                }
             }
         }
     }
 }
 
+/** The device's menu, only in debug builds, for unlinking a linked device. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevelopmentOptions: Boolean, actions: MainScreenActions) {
+private fun DeviceMenu(device: DeviceData, actions: MainScreenActions) {
     var expanded by remember { mutableStateOf(false) }
-    val preferredConfig = device.preferredConfig
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("device_menu")) {
             Icon(Icons.Default.MoreVert, contentDescription = "More options")
@@ -979,36 +1076,14 @@ private fun DeviceMenu(device: DeviceData, isPreferredActive: Boolean, showDevel
         // A menu is a popup, outside the Scaffold that exposes the test tags to UiAutomator
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
             modifier = Modifier.semantics { testTagsAsResourceId = true }) {
-            if (preferredConfig != null && !isPreferredActive) {
-                DropdownMenuItem(
-                    text = { Text("Restore Preferred Codec") },
-                    modifier = Modifier.testTag("restore_preferred"),
-                    onClick = {
-                        expanded = false
-                        actions.restorePreferred(device.address, preferredConfig)
-                    }
-                )
-            }
-            if (preferredConfig != null) {
-                DropdownMenuItem(
-                    text = { Text("Delete Preferred Codec") },
-                    modifier = Modifier.testTag("delete_preferred"),
-                    onClick = {
-                        expanded = false
-                        actions.deletePreferred(device.address)
-                    }
-                )
-            }
-            if (showDevelopmentOptions && device.associated) {
-                DropdownMenuItem(
-                    text = { Text("Unlink Device (Debug)") },
-                    modifier = Modifier.testTag("unlink_device"),
-                    onClick = {
-                        expanded = false
-                        actions.unlink(device.address)
-                    }
-                )
-            }
+            DropdownMenuItem(
+                text = { Text("Unlink Device (Debug)") },
+                modifier = Modifier.testTag("unlink_device"),
+                onClick = {
+                    expanded = false
+                    actions.unlink(device.address)
+                }
+            )
         }
     }
 }
