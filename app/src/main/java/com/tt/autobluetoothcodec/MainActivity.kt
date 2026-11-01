@@ -83,9 +83,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
@@ -607,34 +609,111 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 // Not const, a constant false condition would prevent the smart casts in the guarded blocks
 private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
+/** Prototype: how chips show what's selected. */
+internal enum class ChipStyle {
+    /** Today's: an outline, in the theme's color when selected. */
+    OUTLINED,
+    /** Material's filter chip: selected ones filled in the secondary container's color with a check. */
+    FILTER,
+    /** Selected ones filled in the theme's color, the collapsed card's in its lighter container color. */
+    SOLID,
+    /** No outlines: the others in grey, selected ones filled in the theme's color. */
+    TONAL,
+}
+
+/** Prototype: the chip style to try. */
+internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle.OUTLINED }
+
+/**
+ * A chip of the codec's values. [active] is a chip of the collapsed card, which shows the current codec and can't be
+ * chosen.
+ */
 @Composable
-private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
-    val color = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onBackground
+private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, active: Boolean = false,
+    onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val style = LocalChipStyle.current
+    val container: Color
+    val content: Color
+    val border: Color?
+    when (style) {
+        ChipStyle.OUTLINED -> {
+            content = if (selected) scheme.primary else scheme.onBackground
+            container = Color.Transparent
+            border = content
+        }
+        ChipStyle.FILTER -> if (selected) {
+            container = scheme.secondaryContainer
+            content = scheme.onSecondaryContainer
+            border = null
+        } else {
+            container = Color.Transparent
+            content = scheme.onSurfaceVariant
+            border = scheme.outlineVariant
+        }
+        ChipStyle.SOLID -> when {
+            active -> {
+                container = scheme.primaryContainer
+                content = scheme.onPrimaryContainer
+                border = null
+            }
+            selected -> {
+                container = scheme.primary
+                content = scheme.onPrimary
+                border = null
+            }
+            else -> {
+                container = Color.Transparent
+                content = scheme.onSurfaceVariant
+                border = scheme.outline
+            }
+        }
+        ChipStyle.TONAL -> when {
+            active -> {
+                container = scheme.secondaryContainer
+                content = scheme.onSecondaryContainer
+                border = null
+            }
+            selected -> {
+                container = scheme.primary
+                content = scheme.onPrimary
+                border = null
+            }
+            else -> {
+                container = scheme.surfaceContainerHighest
+                content = scheme.onSurfaceVariant
+                border = null
+            }
+        }
     }
+    val check = style == ChipStyle.FILTER && selected && !active
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
             shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, color = color),
+            color = container,
+            contentColor = content,
+            border = border?.let { BorderStroke(1.dp, it) },
             enabled = clickable,
             onClick = onClick,
             modifier = Modifier.graphicsLayer(alpha = if (enabled) 1f else 0.38f)
         ) {
-            Text(
-                text,
-                Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                color = color,
-                style = MaterialTheme.typography.labelLarge
-            )
+            Row(
+                Modifier.padding(start = if (check) 8.dp else 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (check) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(text, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }
 
 @Composable
 private fun ActiveConfigChip(text: String) {
-    ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
+    ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false, active = true)
 }
 
 /** The chip of the collapsed card that says the preferred codec is active, after the codec's chips. */
@@ -1096,16 +1175,21 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
         }
     }
     // Without a codec there's nothing to expand, the card always shows how to link the device
+    // Prototype: the palettes put the cards on Material's elevated card color
+    val color = if (LocalPaletteOverride.current != null) MaterialTheme.colorScheme.surfaceContainerLow
+        else MaterialTheme.colorScheme.surface
     if (device.statusReadable) {
         Surface(
             onClick = { extended = !extended },
             modifier = modifier,
+            color = color,
             shadowElevation = 6.dp,
             shape = CardDefaults.elevatedShape,
             content = content
         )
     } else {
-        Surface(modifier = modifier, shadowElevation = 6.dp, shape = CardDefaults.elevatedShape, content = content)
+        Surface(modifier = modifier, color = color, shadowElevation = 6.dp, shape = CardDefaults.elevatedShape,
+            content = content)
     }
 }
 

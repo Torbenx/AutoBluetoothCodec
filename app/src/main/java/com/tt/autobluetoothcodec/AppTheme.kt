@@ -1,6 +1,7 @@
 package com.tt.autobluetoothcodec
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -60,7 +61,22 @@ internal object AppColors {
  */
 @Composable
 internal fun AppTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+    val palette = LocalPaletteOverride.current
+    val scheme = when {
+        palette != null -> if (darkTheme) palette.dark else palette.light
+        darkTheme -> darkColorScheme()
+        else -> lightColorScheme()
+    }
     CompositionLocalProvider(LocalStatusColors provides if (darkTheme) darkStatusColors else lightStatusColors) {
-        MaterialTheme(colorScheme = if (darkTheme) darkColorScheme() else lightColorScheme(), content = content)
+        MaterialTheme(colorScheme = scheme, content = content)
     }
 }
+
+/**
+ * Prototype: a palette instead of Material's baseline one, with the cards on surfaceContainerLow like Material's
+ * elevated cards, so they also stand out in dark mode.
+ */
+internal class PaletteOverride(val light: ColorScheme, val dark: ColorScheme)
+
+/** Prototype: the palette to try, none for today's. */
+internal val LocalPaletteOverride = staticCompositionLocalOf<PaletteOverride?> { null }
