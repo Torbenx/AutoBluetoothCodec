@@ -58,7 +58,7 @@ internal fun LicensesScreen(onBack: () -> Unit) {
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         // Padding inside the list, so the entries scroll behind the navigation bar
-        CappedContent(WIDE_CONTENT) { side ->
+        CappedContent(WIDE_CONTENT, tintSides = true) { side ->
             val layoutDirection = LocalLayoutDirection.current
             LibrariesContainer(
                 Modifier.fillMaxSize(),

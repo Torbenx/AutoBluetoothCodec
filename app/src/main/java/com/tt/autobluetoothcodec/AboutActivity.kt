@@ -142,48 +142,51 @@ internal fun AboutScreen(version: String, actions: AboutScreenActions) {
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         // Padding inside the scroll container, so the content scrolls behind the navigation bar
-        CappedContent(NARROW_CONTENT) { side ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding).padding(horizontal = side)) {
+        CappedContent(NARROW_CONTENT, tintSides = true) { side ->
             Column(
-                Modifier.fillMaxWidth().padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)
+                    .padding(horizontal = side)
             ) {
-                AppIcon()
-                Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "Version $version",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.testTag("app_version")
+                Column(
+                    Modifier.fillMaxWidth().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    AppIcon()
+                    Spacer(Modifier.height(16.dp))
+                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineSmall)
+                    Text(
+                        "Version $version",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag("app_version")
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Applies the preferred codec of your Bluetooth devices when they connect.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text("© 2026 Torben Thaysen", style = MaterialTheme.typography.bodySmall)
+                }
+                HorizontalDivider()
+                AboutItem("Source code", REPOSITORY_URL.removePrefix("https://"), "source_code") {
+                    actions.openUrl(REPOSITORY_URL)
+                }
+                AboutItem("License", "MIT License", "license") { actions.openUrl(LICENSE_URL) }
+                AboutItem("Third-party licenses", "The licenses of the libraries this app uses", "third_party_licenses") {
+                    actions.openLicenses()
+                }
+                // Release builds have no INTERNET permission, only debug builds have it for the Mobly snippet.
+                // The log is excluded from backups, see backup_rules.xml.
+                ListItem(
+                    headlineContent = { Text("Privacy") },
+                    supportingContent = {
+                        Text("This app has no internet access and collects no data. Its log stays on this phone " +
+                            "and is left out of backups, unless you share it.")
+                    },
+                    modifier = Modifier.testTag("privacy")
                 )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Applies the preferred codec of your Bluetooth devices when they connect.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(16.dp))
-                Text("© 2026 Torben Thaysen", style = MaterialTheme.typography.bodySmall)
             }
-            HorizontalDivider()
-            AboutItem("Source code", REPOSITORY_URL.removePrefix("https://"), "source_code") {
-                actions.openUrl(REPOSITORY_URL)
-            }
-            AboutItem("License", "MIT License", "license") { actions.openUrl(LICENSE_URL) }
-            AboutItem("Third-party licenses", "The licenses of the libraries this app uses", "third_party_licenses") {
-                actions.openLicenses()
-            }
-            // Release builds have no INTERNET permission, only debug builds have it for the Mobly snippet.
-            // The log is excluded from backups, see backup_rules.xml.
-            ListItem(
-                headlineContent = { Text("Privacy") },
-                supportingContent = {
-                    Text("This app has no internet access and collects no data. Its log stays on this phone " +
-                        "and is left out of backups, unless you share it.")
-                },
-                modifier = Modifier.testTag("privacy")
-            )
-        }
         }
     }
 }

@@ -779,55 +779,55 @@ internal fun LogScreen(
     ) { innerPadding ->
         val layoutDirection = LocalLayoutDirection.current
         // The bottom padding is inside the list, so the entries scroll behind the navigation bar
-        CappedContent(WIDE_CONTENT) { side ->
-        Column(
-            Modifier.fillMaxSize().padding(
-                start = innerPadding.calculateStartPadding(layoutDirection),
-                top = innerPadding.calculateTopPadding(),
-                end = innerPadding.calculateEndPadding(layoutDirection)
-            )
-        ) {
-            if (events == null)
-                return@Column
-            val entries = remember(events) { buildEntries(events).reversed() }
-            if (entries.isEmpty()) {
-                val text = when {
-                    !ownLog -> "No events in this file"
-                    !loggingEnabled -> "Logging is disabled"
-                    else -> "No events logged yet"
+        CappedContent(WIDE_CONTENT, tintSides = true) { side ->
+            Column(
+                Modifier.fillMaxSize().padding(
+                    start = innerPadding.calculateStartPadding(layoutDirection),
+                    top = innerPadding.calculateTopPadding(),
+                    end = innerPadding.calculateEndPadding(layoutDirection)
+                )
+            ) {
+                if (events == null)
+                    return@Column
+                val entries = remember(events) { buildEntries(events).reversed() }
+                if (entries.isEmpty()) {
+                    val text = when {
+                        !ownLog -> "No events in this file"
+                        !loggingEnabled -> "Logging is disabled"
+                        else -> "No events logged yet"
+                    }
+                    Box(Modifier.fillMaxSize().padding(horizontal = side).padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(text, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    return@Column
                 }
-                Box(Modifier.fillMaxSize().padding(horizontal = side).padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(text, style = MaterialTheme.typography.bodyLarge)
-                }
-                return@Column
-            }
-            BoxWithConstraints {
-                CompositionLocalProvider(LocalTimeColumn provides timeColumnWidth(maxWidth - side * 2)) {
-                    LazyColumn(
-                        contentPadding = PaddingValues(start = side, end = side, bottom = innerPadding.calculateBottomPadding()),
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        var day: LocalDate? = null
-                        for (entry in entries) {
-                            val entryDay = zoned(entry.first.time).toLocalDate()
-                            if (entryDay != day) {
-                                day = entryDay
-                                item(key = "day $entryDay") {
-                                    Text(
-                                        describeDay(entryDay, today),
-                                        style = MaterialTheme.typography.titleSmall,
-                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
-                                    )
+                BoxWithConstraints {
+                    CompositionLocalProvider(LocalTimeColumn provides timeColumnWidth(maxWidth - side * 2)) {
+                        LazyColumn(
+                            contentPadding = PaddingValues(start = side, end = side, bottom = innerPadding.calculateBottomPadding()),
+                            verticalArrangement = Arrangement.Top
+                        ) {
+                            var day: LocalDate? = null
+                            for (entry in entries) {
+                                val entryDay = zoned(entry.first.time).toLocalDate()
+                                if (entryDay != day) {
+                                    day = entryDay
+                                    item(key = "day $entryDay") {
+                                        Text(
+                                            describeDay(entryDay, today),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+                                        )
+                                    }
+                                } else {
+                                    item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
                                 }
-                            } else {
-                                item(key = "divider ${entry.first.seq}") { HorizontalDivider(Modifier.padding(horizontal = 16.dp)) }
+                                item(key = entry.first.seq) { EntryItem(entry) }
                             }
-                            item(key = entry.first.seq) { EntryItem(entry) }
                         }
                     }
                 }
             }
-        }
         }
     }
     if (showExportDialog)

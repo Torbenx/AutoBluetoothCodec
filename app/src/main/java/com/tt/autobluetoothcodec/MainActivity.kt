@@ -1333,25 +1333,19 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, init
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         if (state.permissionState != PermissionState.GRANTED) {
-            CappedContent(NARROW_CONTENT) { side ->
+            CappedContent(NARROW_CONTENT, tintSides = false) { side ->
                 PermissionRequired(Modifier.padding(innerPadding).padding(horizontal = side), state.permissionState, actions)
             }
         } else {
-            CappedContent(NARROW_CONTENT) { side ->
-                // At least as tall as the window, so the cards can sit lower when they don't fill it
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val windowHeight = maxHeight
-                    // Padding inside the scroll container, so the cards scroll behind the navigation bar
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                        Column(
-                            Modifier.fillMaxWidth().heightIn(min = windowHeight).padding(innerPadding)
-                                .padding(horizontal = side),
-                            verticalArrangement = BiasArrangement(LocalContentLayout.current.devicePlacement)
-                        ) {
-                            for (device in state.devices) key(device.address) {
-                                DeviceCard(device, initialExtended = device.address in initiallyExpanded, state, actions)
-                            }
-                        }
+            CappedContent(NARROW_CONTENT, tintSides = false) { side ->
+                // Padding inside the scroll container, so the cards scroll behind the navigation bar
+                Column(
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)
+                        .padding(horizontal = side)
+                ) {
+                    // Keyed, so each card keeps its own saved state
+                    for (device in state.devices) key(device.address) {
+                        DeviceCard(device, initialExtended = device.address in initiallyExpanded, state, actions)
                     }
                 }
             }

@@ -109,21 +109,6 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,
                         interaction.second))
-            val landscape = CONFIGURATIONS.first { it.name == "Phone, landscape" }
-            val foldable = CONFIGURATIONS.first { it.name == "Foldable" }
-            val tablet = CONFIGURATIONS.first { it.name == "Tablet" }
-            val tabletDark = Device("Tablet, dark", 1280, 800, dark = true)
-            for (scene in widthPrototypes) {
-                val devices = mutableListOf(landscape, foldable, tablet)
-                if ("tinted" in scene.name)
-                    devices.add(tabletDark)
-                for (device in devices)
-                    shots.add(Shot("5 Prototypes", scene, device,
-                        if (scene.name.endsWith("Licenses")) waitForLicenses else ({})))
-            }
-            for (scene in heightPrototypes)
-                for (device in listOf(PHONE, landscape, tablet))
-                    shots.add(Shot("5 Prototypes", scene, device))
             return shots
         }
 
