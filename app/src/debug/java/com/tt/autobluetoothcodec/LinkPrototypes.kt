@@ -1,6 +1,5 @@
 package com.tt.autobluetoothcodec
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -88,23 +87,30 @@ private fun explanation(state: LinkState) = when (state) {
     LinkState.CANT_LINK -> "This phone can't link devices, so the codec can't be read or changed."
 }
 
-internal enum class CollapsedDesign(val title: String) {
-    CHIP("Not linked chip"),
-    CHIP_TERTIARY("Not linked chip, theme tertiary"),
-    CHIP_OUTLINE("Not linked chip, outlined"),
-    PLACEHOLDER("Codec placeholder and chip"),
-    STATUS_LINE("Status line"),
-    NAME_ICON("Icon by the name"),
-    INLINE_BUTTON("Link button in the card"),
+/** What the readable state's note or banner says: the next change asks to link, so there's no button. */
+private const val READABLE_NOTE = "Changing the codec or saving it as preferred asks to link this device first."
+
+/** The collapsed card: the amber "Not linked" chip, with a placeholder while the codec is hidden. */
+internal enum class CollapsedDesign(val title: String, val placeholder: String? = null, val open: Boolean = false) {
+    CHIP_ONLY("Chip only"),
+    UNKNOWN("Codec unknown", placeholder = "Codec unknown"),
+    UNAVAILABLE("Codec unavailable", placeholder = "Codec unavailable"),
+    NO_INFO("No codec information", placeholder = "No codec information"),
+    /** With nothing to collapse, a hidden codec's card always shows its explanation and button. */
+    OPEN("Always open while hidden", open = true),
+    OPEN_CHIPS("Always open while hidden, with chips", placeholder = "Codec unknown", open = true),
 }
 
-internal enum class ExpandedDesign(val title: String) {
-    SECTION("Section with heading"),
-    ABOVE("Text above the button"),
-    BELOW("Text below the button"),
-    BANNER("Banner at the top"),
-    NO_BUTTON("No button while readable"),
+/** Where the readable state's note goes, and whether a hidden codec's card is always open. */
+internal enum class ExpandedDesign(val title: String, val readableBanner: BannerPlace?, val open: Boolean = false) {
+    NOTE("Note under Save", null),
+    BANNER_TOP("Banner at the top while readable", BannerPlace.TOP),
+    BANNER_SAVE("Banner under Save while readable", BannerPlace.UNDER_SAVE),
+    OPEN_TOP("Always open while hidden, banner at the top", BannerPlace.TOP, open = true),
+    OPEN_SAVE("Always open while hidden, banner under Save", BannerPlace.UNDER_SAVE, open = true),
 }
+
+internal enum class BannerPlace { TOP, UNDER_SAVE }
 
 /** Amber, for a state that needs attention without being an error. */
 private class Attention(val container: Color, val onContainer: Color, val accent: Color)
@@ -123,24 +129,15 @@ private fun Spinner(size: Dp, color: Color) =
     CircularProgressIndicator(progress = { 0.3f }, modifier = Modifier.size(size), color = color, strokeWidth = 2.dp,
         trackColor = Color.Transparent)
 
-/** The chip after the codec's chips: "Not linked", "Linking…" or "Can't link". */
+/** The chip after the codec's chips: "Not linked" and "Linking…" in amber, "Can't link" in grey. */
 @Composable
-private fun LinkChip(state: LinkState, design: CollapsedDesign) {
+private fun LinkChip(state: LinkState) {
     val scheme = MaterialTheme.colorScheme
     val amber = attention()
-    val neutral = state == LinkState.CANT_LINK
-    val (container, content) = when {
-        neutral -> scheme.surfaceVariant to scheme.onSurfaceVariant
-        design == CollapsedDesign.CHIP_TERTIARY -> scheme.tertiaryContainer to scheme.onTertiaryContainer
-        design == CollapsedDesign.CHIP_OUTLINE -> Color.Transparent to amber.accent
-        else -> amber.container to amber.onContainer
-    }
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = container,
-        contentColor = content,
-        border = if (design == CollapsedDesign.CHIP_OUTLINE && !neutral) BorderStroke(1.dp, content) else null,
-    ) {
+    val (container, content) =
+        if (state == LinkState.CANT_LINK) scheme.surfaceVariant to scheme.onSurfaceVariant
+        else amber.container to amber.onContainer
+    Surface(shape = RoundedCornerShape(8.dp), color = container, contentColor = content) {
         Row(
             Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -194,7 +191,7 @@ private fun LinkButton(state: LinkState) {
 
 /** The explanation in a tinted box with the "link off" icon. */
 @Composable
-private fun Banner(state: LinkState) {
+private fun Banner(state: LinkState, text: String = explanation(state)) {
     val amber = attention()
     val neutral = state == LinkState.CANT_LINK
     Surface(
@@ -206,77 +203,31 @@ private fun Banner(state: LinkState) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(LinkOffIcon, contentDescription = null, modifier = Modifier.size(preferredIconSize()))
             Spacer(Modifier.width(12.dp))
-            Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
+            Text(text, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
-/** The expanded card's link section, at its bottom. */
+/** A hidden codec's link section: a "Not Linked" section like Preferred Codec, or just the text and the button. */
 @Composable
-private fun LinkSection(state: LinkState, design: ExpandedDesign, topGap: Dp) {
+private fun LinkSection(state: LinkState, heading: Boolean) {
     val canLink = state != LinkState.CANT_LINK
     Column {
-        Spacer(Modifier.height(topGap))
-        when (design) {
-            // Choosing a codec and Save ask to link anyway, so a readable codec only gets a note
-            ExpandedDesign.NO_BUTTON -> if (state == LinkState.READABLE) {
-                Text(
-                    "Changing the codec or saving it as preferred asks to link this device first.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            } else {
-                Text(if (canLink) "Not Linked" else "Can't Link", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
-                if (canLink) {
-                    Spacer(Modifier.height(8.dp))
-                    LinkButton(state)
-                }
-            }
-            ExpandedDesign.SECTION -> {
-                Text(if (canLink) "Not Linked" else "Can't Link", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
-                if (canLink) {
-                    Spacer(Modifier.height(8.dp))
-                    LinkButton(state)
-                }
-            }
-            ExpandedDesign.ABOVE -> {
-                Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
-                if (canLink) {
-                    Spacer(Modifier.height(8.dp))
-                    LinkButton(state)
-                }
-            }
-            ExpandedDesign.BELOW -> {
-                if (canLink) {
-                    LinkButton(state)
-                    Spacer(Modifier.height(6.dp))
-                }
-                Text(
-                    explanation(state),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-            ExpandedDesign.BANNER -> if (canLink) LinkButton(state)
+        if (heading) {
+            Text(if (canLink) "Not Linked" else "Can't Link", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+        }
+        Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
+        if (canLink) {
+            Spacer(Modifier.height(8.dp))
+            LinkButton(state)
         }
     }
 }
 
 /** A device card like the app's, with the prototyped parts. */
 @Composable
-private fun ProtoCard(
-    device: DeviceData,
-    state: LinkState?,
-    collapsed: CollapsedDesign?,
-    expanded: ExpandedDesign?,
-) {
-    val amber = attention()
+private fun ProtoCard(device: DeviceData, state: LinkState?, collapsed: CollapsedDesign?, expanded: ExpandedDesign?) {
     Surface(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
         shadowElevation = 6.dp,
@@ -291,85 +242,67 @@ private fun ProtoCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
-                if (state != null && collapsed == CollapsedDesign.NAME_ICON) {
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        when (state) {
-                            LinkState.LINKING -> Spinner(20.dp, amber.accent)
-                            LinkState.CANT_LINK ->
-                                Icon(LinkOffIcon, "Can't link", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            else -> Icon(LinkOffIcon, "Not linked", tint = amber.accent)
-                        }
-                    }
-                }
             }
             Spacer(Modifier.height(8.dp))
-            if (state == null) {
-                CodecChips(device)
-            } else if (expanded != null) {
-                if (expanded == ExpandedDesign.BANNER) {
-                    Banner(state)
-                    Spacer(Modifier.height(if (device.statusReadable) 16.dp else 4.dp))
-                }
-                if (device.statusReadable) {
-                    CodecConfigSelection(device, onConfigChange = {})
-                    PreferredCodecActions(device, NoMainActions)
-                }
-                LinkSection(state, expanded, topGap = if (device.statusReadable) 16.dp else 8.dp)
-            } else {
-                Collapsed(device, state, collapsed!!)
+            when {
+                state == null -> CodecChips(device)
+                expanded != null -> Expanded(device, state, expanded)
+                else -> Collapsed(device, state, collapsed!!)
             }
         }
     }
 }
 
 @Composable
-private fun Collapsed(device: DeviceData, state: LinkState, design: CollapsedDesign) {
-    val amber = attention()
-    when (design) {
-        CollapsedDesign.CHIP, CollapsedDesign.CHIP_TERTIARY, CollapsedDesign.CHIP_OUTLINE, CollapsedDesign.PLACEHOLDER ->
-            if (device.statusReadable) {
-                CodecChips(device) { LinkChip(state, design) }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (design == CollapsedDesign.PLACEHOLDER)
-                        ActiveConfigChip("Codec hidden")
-                    LinkChip(state, design)
-                }
+private fun Expanded(device: DeviceData, state: LinkState, design: ExpandedDesign) {
+    if (!device.statusReadable) {
+        // The same as collapsed when it's always open
+        if (design.open) LinkSection(state, heading = false) else LinkSection(state, heading = true)
+        return
+    }
+    Column {
+        if (design.readableBanner == BannerPlace.TOP) {
+            Banner(state, READABLE_NOTE)
+            Spacer(Modifier.height(16.dp))
+        }
+        CodecConfigSelection(device, onConfigChange = {})
+        PreferredCodecActions(device, NoMainActions)
+        when (design.readableBanner) {
+            BannerPlace.UNDER_SAVE -> {
+                Spacer(Modifier.height(12.dp))
+                Banner(state, READABLE_NOTE)
             }
-        CollapsedDesign.STATUS_LINE -> Column {
-            val neutral = state == LinkState.CANT_LINK
-            val color = if (neutral) MaterialTheme.colorScheme.onSurfaceVariant else amber.accent
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (state == LinkState.LINKING) Spinner(16.dp, color)
-                else Icon(LinkOffIcon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
+            null -> {
+                Spacer(Modifier.height(16.dp))
                 Text(
-                    when (state) {
-                        LinkState.HIDDEN -> "Not linked, so the codec is hidden"
-                        LinkState.READABLE -> "Not linked, changing the codec asks to link it"
-                        LinkState.LINKING -> "Linking…"
-                        LinkState.CANT_LINK -> "This phone can't link devices"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = color
+                    READABLE_NOTE,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp)
                 )
             }
-            if (device.statusReadable) {
-                Spacer(Modifier.height(10.dp))
-                CodecChips(device)
+            else -> {}
+        }
+    }
+}
+
+@Composable
+private fun Collapsed(device: DeviceData, state: LinkState, design: CollapsedDesign) {
+    if (device.statusReadable) {
+        CodecChips(device) { LinkChip(state) }
+        return
+    }
+    Column {
+        if (!design.open || design.placeholder != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                design.placeholder?.let { ActiveConfigChip(it) }
+                LinkChip(state)
             }
         }
-        CollapsedDesign.NAME_ICON -> if (device.statusReadable) CodecChips(device)
-        CollapsedDesign.INLINE_BUTTON -> Column {
-            Text(explanation(state), style = MaterialTheme.typography.bodyMedium)
-            if (state != LinkState.CANT_LINK) {
-                Spacer(Modifier.height(8.dp))
-                LinkButton(state)
-            }
-            if (device.statusReadable) {
+        if (design.open) {
+            if (design.placeholder != null)
                 Spacer(Modifier.height(12.dp))
-                CodecChips(device)
-            }
+            LinkSection(state, heading = false)
         }
     }
 }
