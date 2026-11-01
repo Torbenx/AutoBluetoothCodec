@@ -502,12 +502,19 @@ internal val palettes = listOf<Pair<String, PaletteOverride?>>(
     "Orange wallpaper" to wallpaperOrange,
 )
 
-internal val chipStyles = listOf(
-    "Outlined" to ChipStyle.OUTLINED,
-    "Filter" to ChipStyle.FILTER,
-    "Solid" to ChipStyle.SOLID,
-    "Tonal" to ChipStyle.TONAL,
+/** The selected chips' colors, each with the others outlined faintly and in grey. */
+internal val chipFills = listOf(
+    "Secondary container" to SelectedFill.SECONDARY_CONTAINER,
+    "Primary container" to SelectedFill.PRIMARY_CONTAINER,
+    "Inverse primary" to SelectedFill.INVERSE_PRIMARY,
+    "Secondary" to SelectedFill.SECONDARY,
+    "Primary" to SelectedFill.PRIMARY,
 )
+
+private val unselected = listOf("Outline" to false, "Grey" to true)
+
+/** The palettes the chips are tried in, the others are tried with the pick. */
+private val chipPalettes = listOf("Today", "Blue", "Teal")
 
 /** The main screen as it's usually seen, an expanded card, and the link's states. */
 private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
@@ -541,10 +548,17 @@ private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
 private fun WithColors(palette: PaletteOverride?, style: ChipStyle, content: @Composable () -> Unit) =
     CompositionLocalProvider(LocalPaletteOverride provides palette, LocalChipStyle provides style, content = content)
 
+/** Every chip color in a few palettes, the pick in every palette. */
 internal val colorPrototypes: List<Scene> = palettes.flatMap { (paletteName, palette) ->
-    chipStyles.flatMap { (styleName, style) ->
-        colorScreens.map { (screen, content) ->
-            Scene("Colors, $paletteName, $styleName, $screen") { WithColors(palette, style) { content() } }
+    chipFills.flatMap { (fillName, fill) ->
+        unselected.flatMap { (unselectedName, grey) ->
+            val pick = fill == SelectedFill.INVERSE_PRIMARY && !grey
+            if (paletteName !in chipPalettes && !pick) emptyList()
+            else colorScreens.map { (screen, content) ->
+                Scene("Colors, $paletteName, $fillName, $unselectedName, $screen") {
+                    WithColors(palette, ChipStyle(fill, grey)) { content() }
+                }
+            }
         }
-    } + Scene("Colors, $paletteName, -, Log") { WithColors(palette, ChipStyle.OUTLINED) { Screens.log.content() } }
+    }
 }

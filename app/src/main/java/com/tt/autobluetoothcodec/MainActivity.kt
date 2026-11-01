@@ -609,20 +609,28 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 // Not const, a constant false condition would prevent the smart casts in the guarded blocks
 private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
-/** Prototype: how chips show what's selected. */
-internal enum class ChipStyle {
-    /** Today's: an outline, in the theme's color when selected. */
-    OUTLINED,
-    /** Material's filter chip: selected ones filled in the secondary container's color with a check. */
-    FILTER,
-    /** Selected ones filled in the theme's color, the others outlined. */
-    SOLID,
-    /** No outlines: the others in grey, selected ones filled in the theme's color. */
-    TONAL,
+/** Prototype: the color of a selected chip, from the quietest to the loudest. */
+internal enum class SelectedFill {
+    /** Material's filter chip, tone 90 of the low-chroma secondary palette in light mode. */
+    SECONDARY_CONTAINER,
+    /** Tone 90 of the theme's color in light mode, tone 30 in dark mode, the color of Save. */
+    PRIMARY_CONTAINER,
+    /** Tone 80 of the theme's color in light mode, tone 40 in dark mode. */
+    INVERSE_PRIMARY,
+    /** The low-chroma secondary color, tone 40 in light mode, tone 80 in dark mode. */
+    SECONDARY,
+    /** The theme's color, tone 40 in light mode, tone 80 in dark mode. */
+    PRIMARY,
 }
 
+/**
+ * Prototype: how chips show what's selected, without a fill today's outline. The others are outlined faintly, or
+ * in grey with [greyUnselected]. The prototypes also give the preferred codec's chip Restore's stronger green.
+ */
+internal data class ChipStyle(val fill: SelectedFill? = null, val greyUnselected: Boolean = false)
+
 /** Prototype: the chip style to try. */
-internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle.OUTLINED }
+internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle() }
 
 /** A chip of the codec's values. The collapsed card's chips look like the selected ones, but can't be chosen. */
 @Composable
@@ -632,41 +640,48 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
     val container: Color
     val content: Color
     val border: Color?
-    when (style) {
-        ChipStyle.OUTLINED -> {
+    when {
+        style.fill == null -> {
             content = if (selected) scheme.primary else scheme.onBackground
             container = Color.Transparent
             border = content
         }
-        ChipStyle.FILTER -> if (selected) {
-            container = scheme.secondaryContainer
-            content = scheme.onSecondaryContainer
+        selected -> {
             border = null
-        } else {
-            container = Color.Transparent
-            content = scheme.onSurfaceVariant
-            border = scheme.outlineVariant
+            when (style.fill) {
+                SelectedFill.SECONDARY_CONTAINER -> {
+                    container = scheme.secondaryContainer
+                    content = scheme.onSecondaryContainer
+                }
+                SelectedFill.PRIMARY_CONTAINER -> {
+                    container = scheme.primaryContainer
+                    content = scheme.onPrimaryContainer
+                }
+                SelectedFill.INVERSE_PRIMARY -> {
+                    container = scheme.inversePrimary
+                    content = scheme.onPrimaryContainer
+                }
+                SelectedFill.SECONDARY -> {
+                    container = scheme.secondary
+                    content = scheme.onSecondary
+                }
+                SelectedFill.PRIMARY -> {
+                    container = scheme.primary
+                    content = scheme.onPrimary
+                }
+            }
         }
-        ChipStyle.SOLID -> if (selected) {
-            container = scheme.primary
-            content = scheme.onPrimary
-            border = null
-        } else {
-            container = Color.Transparent
-            content = scheme.onSurfaceVariant
-            border = scheme.outline
-        }
-        ChipStyle.TONAL -> if (selected) {
-            container = scheme.primary
-            content = scheme.onPrimary
-            border = null
-        } else {
+        style.greyUnselected -> {
             container = scheme.surfaceContainerHighest
             content = scheme.onSurfaceVariant
             border = null
         }
+        else -> {
+            container = Color.Transparent
+            content = scheme.onSurfaceVariant
+            border = scheme.outlineVariant
+        }
     }
-    val check = style == ChipStyle.FILTER && selected
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
             shape = RoundedCornerShape(8.dp),
@@ -677,19 +692,16 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
             onClick = onClick,
             modifier = Modifier.graphicsLayer(alpha = if (enabled) 1f else 0.38f)
         ) {
-            Row(
-                Modifier.padding(start = if (check) 8.dp else 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (check) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(text, style = MaterialTheme.typography.labelLarge)
-            }
+            Text(text, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
         }
     }
 }
+
+/** Prototype: the preferred codec's green, Restore's stronger one in the prototyped chip styles. */
+@Composable
+private fun preferredColors(): Pair<Color, Color> =
+    if (LocalChipStyle.current.fill != null) AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
+    else AppColors.status.successContainer to AppColors.status.onSuccessContainer
 
 @Composable
 private fun ActiveConfigChip(text: String) {
@@ -701,8 +713,8 @@ private fun ActiveConfigChip(text: String) {
 private fun PreferredChip() {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = AppColors.status.successContainer,
-        contentColor = AppColors.status.onSuccessContainer,
+        color = preferredColors().first,
+        contentColor = preferredColors().second,
         modifier = Modifier.testTag("preferred_chip")
     ) {
         Row(
@@ -805,8 +817,8 @@ private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, m
 private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = AppColors.status.successContainer,
-        contentColor = AppColors.status.onSuccessContainer,
+        color = preferredColors().first,
+        contentColor = preferredColors().second,
         modifier = modifier.testTag("preferred_active")
     ) {
         PreferredContent("Active", Icons.Default.Check, showLabel)
