@@ -67,7 +67,11 @@ internal fun AppTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Comp
         darkTheme -> darkColorScheme()
         else -> lightColorScheme()
     }
-    CompositionLocalProvider(LocalStatusColors provides if (darkTheme) darkStatusColors else lightStatusColors) {
+    val onInversePrimary = if (darkTheme) palette?.onInversePrimaryDark else palette?.onInversePrimaryLight
+    CompositionLocalProvider(
+        LocalStatusColors provides if (darkTheme) darkStatusColors else lightStatusColors,
+        LocalOnInversePrimary provides onInversePrimary,
+    ) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
@@ -76,7 +80,18 @@ internal fun AppTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Comp
  * Prototype: a palette instead of Material's baseline one, with the cards on surfaceContainerLow like Material's
  * elevated cards, so they also stand out in dark mode.
  */
-internal class PaletteOverride(val light: ColorScheme, val dark: ColorScheme)
+internal class PaletteOverride(
+    val light: ColorScheme,
+    val dark: ColorScheme,
+    val onInversePrimaryLight: Color? = null,
+    val onInversePrimaryDark: Color? = null,
+)
+
+/**
+ * Prototype: the text on a chip in the inverse primary color, when the primary container's text doesn't suit it,
+ * as in a fidelity scheme, whose primary container is the saturated seed color.
+ */
+internal val LocalOnInversePrimary = staticCompositionLocalOf<Color?> { null }
 
 /** Prototype: the palette to try, none for today's. */
 internal val LocalPaletteOverride = staticCompositionLocalOf<PaletteOverride?> { null }

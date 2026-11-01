@@ -492,29 +492,25 @@ private val wallpaperOrange = PaletteOverride(
 )
 
 
-internal val palettes = listOf<Pair<String, PaletteOverride?>>(
-    "Today" to null,
+/** Material's baseline purple, today's palette, with the cards on surfaceContainerLow like the others. */
+private val baseline = PaletteOverride(lightColorScheme(), darkColorScheme())
+
+/** The vivid blue, with text on the inverse primary that suits it: tones 30 and 90 like the other palettes. */
+private val blueVividFixed = PaletteOverride(
+    blueVivid.light, blueVivid.dark,
+    onInversePrimaryLight = Color(0xFF00468C),
+    onInversePrimaryDark = Color(0xFFD6E3FF),
+)
+
+internal val palettes = listOf(
+    "Today's purple" to baseline,
     "Blue" to blue,
-    "Vivid blue" to blueVivid,
-    "Teal" to teal,
+    "Vivid blue, fixed" to blueVividFixed,
     "Neutral" to neutral,
-    "Green wallpaper" to wallpaperGreen,
-    "Orange wallpaper" to wallpaperOrange,
 )
 
-/** The selected chips' colors, each with the others outlined faintly and in grey. */
-internal val chipFills = listOf(
-    "Secondary container" to SelectedFill.SECONDARY_CONTAINER,
-    "Primary container" to SelectedFill.PRIMARY_CONTAINER,
-    "Inverse primary" to SelectedFill.INVERSE_PRIMARY,
-    "Secondary" to SelectedFill.SECONDARY,
-    "Primary" to SelectedFill.PRIMARY,
-)
-
-private val unselected = listOf("Outline" to false, "Grey" to true)
-
-/** The palettes the chips are tried in, the others are tried with the pick. */
-private val chipPalettes = listOf("Today", "Blue", "Teal")
+/** The chips picked in round 2: inverse primary, the others faintly outlined. */
+private val pickedChips = ChipStyle(SelectedFill.INVERSE_PRIMARY)
 
 /** The main screen as it's usually seen, an expanded card, and the link's states. */
 private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
@@ -548,17 +544,11 @@ private val colorScreens = listOf<Pair<String, @Composable () -> Unit>>(
 private fun WithColors(palette: PaletteOverride?, style: ChipStyle, content: @Composable () -> Unit) =
     CompositionLocalProvider(LocalPaletteOverride provides palette, LocalChipStyle provides style, content = content)
 
-/** Every chip color in a few palettes, the pick in every palette. */
+private val logScreen: Pair<String, @Composable () -> Unit> = "Log" to { Screens.log.content() }
+
+/** The picked chips in the remaining palettes, and the log. */
 internal val colorPrototypes: List<Scene> = palettes.flatMap { (paletteName, palette) ->
-    chipFills.flatMap { (fillName, fill) ->
-        unselected.flatMap { (unselectedName, grey) ->
-            val pick = fill == SelectedFill.INVERSE_PRIMARY && !grey
-            if (paletteName !in chipPalettes && !pick) emptyList()
-            else colorScreens.map { (screen, content) ->
-                Scene("Colors, $paletteName, $fillName, $unselectedName, $screen") {
-                    WithColors(palette, ChipStyle(fill, grey)) { content() }
-                }
-            }
-        }
+    (colorScreens + logScreen).map { (screen, content) ->
+        Scene("Colors, $paletteName, $screen") { WithColors(palette, pickedChips) { content() } }
     }
 }

@@ -659,7 +659,7 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
                 }
                 SelectedFill.INVERSE_PRIMARY -> {
                     container = scheme.inversePrimary
-                    content = scheme.onPrimaryContainer
+                    content = LocalOnInversePrimary.current ?: scheme.onPrimaryContainer
                 }
                 SelectedFill.SECONDARY -> {
                     container = scheme.secondary
