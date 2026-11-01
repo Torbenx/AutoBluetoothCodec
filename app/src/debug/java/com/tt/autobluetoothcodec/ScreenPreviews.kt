@@ -105,7 +105,7 @@ internal val mainScreenStates = listOf(
     mainScene("Codec unreadable until linked",
         state(device(statusReadable = false, associationRequired = true, associated = false))),
     mainScene("Linking in progress",
-        state(device(statusReadable = false, associationRequired = true, associated = false), associationInProgress = true)),
+        state(device(statusReadable = false, associationRequired = true, associated = false), linkingAddress = ADDRESS)),
     // Before Android 16 the codec can be read without a link, choosing one asks to link
     mainScene("Codec readable, not linked",
         state(device(associationRequired = true, associated = false))),
@@ -138,6 +138,8 @@ internal val mainScreenStates = listOf(
         state(device(ldac(CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24), preferred = ldac()), sony(preferred = aac())),
         setOf(ADDRESS)),
     // Only restoring and clearing, a codec this app doesn't know can't be saved
+    mainScene("Expanded, codec readable, not linked",
+        state(device(associationRequired = true, associated = false)), setOf(ADDRESS)),
     mainScene("Expanded, unsupported codec, preferred saved", state(
         device(codec = null, android = AndroidCodecConfig(CODEC_TYPE_LC3, CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_16),
             preferred = ldac()),

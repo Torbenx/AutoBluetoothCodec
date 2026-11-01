@@ -89,9 +89,9 @@ internal object SampleData {
         vararg devices: DeviceData,
         permissionState: PermissionState = PermissionState.GRANTED,
         canAssociate: Boolean = true,
-        associationInProgress: Boolean = false,
+        linkingAddress: String? = null,
         showDevelopmentOptions: Boolean = false,
-    ) = MainScreenState(permissionState, devices.toList(), canAssociate, associationInProgress, showDevelopmentOptions)
+    ) = MainScreenState(permissionState, devices.toList(), canAssociate, linkingAddress, showDevelopmentOptions)
 
     val TODAY: LocalDate = LocalDate.of(2026, 10, 27)
 

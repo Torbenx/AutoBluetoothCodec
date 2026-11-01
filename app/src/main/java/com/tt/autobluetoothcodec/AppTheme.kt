@@ -12,8 +12,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * Colors Material's color scheme doesn't have: success for a codec that's the preferred one, and the green of
- * restoring it, which leads there.
+ * Colors Material's color scheme doesn't have: success for a codec that's the preferred one, the green of
+ * restoring it, which leads there, and amber for a device that isn't linked, which needs attention without
+ * being an error.
  */
 @Immutable
 internal data class StatusColors(
@@ -21,6 +22,8 @@ internal data class StatusColors(
     val onSuccessContainer: Color,
     val restoreContainer: Color,
     val onRestoreContainer: Color,
+    val attentionContainer: Color,
+    val onAttentionContainer: Color,
 )
 
 private val lightStatusColors = StatusColors(
@@ -29,6 +32,9 @@ private val lightStatusColors = StatusColors(
     onSuccessContainer = Color(0xFF2E7D32),
     restoreContainer = Color(0xFFC3EFC0),
     onRestoreContainer = Color(0xFF002106),
+    attentionContainer = Color(0xFFFFDDB3),
+    // 8:1 on the container
+    onAttentionContainer = Color(0xFF5C3A00),
 )
 
 private val darkStatusColors = StatusColors(
@@ -36,6 +42,8 @@ private val darkStatusColors = StatusColors(
     onSuccessContainer = Color(0xFFA8D5B0),
     restoreContainer = Color(0xFF1E5124),
     onRestoreContainer = Color(0xFFB6F2B4),
+    attentionContainer = Color(0xFF4A3200),
+    onAttentionContainer = Color(0xFFFFDDB3),
 )
 
 private val LocalStatusColors = staticCompositionLocalOf { lightStatusColors }

@@ -109,14 +109,6 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,
                         interaction.second))
-            for (scene in linkPrototypes) {
-                val devices = if (scene.name.startsWith("Expanded"))
-                    listOf(PHONE, PHONE_DARK, Device("Small phone, font 200%", 360, 640, fontScale = 2f))
-                else
-                    listOf(PHONE, PHONE_DARK)
-                for (device in devices)
-                    shots.add(Shot("5 Prototypes", scene, device))
-            }
             return shots
         }
 

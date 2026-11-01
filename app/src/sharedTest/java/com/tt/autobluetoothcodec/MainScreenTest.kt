@@ -1,5 +1,6 @@
 package com.tt.autobluetoothcodec
 
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -31,9 +32,9 @@ class MainScreenTest {
     private fun show(state: MainScreenState) = compose.setContent { MainScreen(state, actions) }
 
     private fun show(device: DeviceData, showDevelopmentOptions: Boolean = false, canAssociate: Boolean = true,
-                     associationInProgress: Boolean = false) =
+                     linkingAddress: String? = null) =
         show(state(device, showDevelopmentOptions = showDevelopmentOptions, canAssociate = canAssociate,
-            associationInProgress = associationInProgress))
+            linkingAddress = linkingAddress))
 
     private fun text(text: String) = compose.onNodeWithText(text, useUnmergedTree = true)
 
@@ -213,42 +214,90 @@ class MainScreenTest {
 
     // V5
 
+    private val hidden = device(statusReadable = false, codec = null, android = null, associated = false,
+        associationRequired = true)
+
     @Test
     fun anUnreadableCodecAsksForALink() {
-        show(device(statusReadable = false, codec = null, android = null, associated = false, associationRequired = true))
-        text("Link $NAME to see and change its codec.").assertExists()
+        show(hidden)
+        text("Link this device to see and change its codec.").assertExists()
         compose.onNodeWithTag("link_device").assertIsEnabled().performClick()
         assertEquals(listOf("link $ADDRESS"), actions.calls)
         text("LDAC").assertDoesNotExist()
     }
 
     @Test
-    fun aPreferredCodecWithoutLinkAsksForOneNextToTheCodec() {
-        // The API 34 and 35 state: readable, but a link is needed to apply the preferred codec
-        show(device(associated = false, associationRequired = true, preferred = ldac()))
-        text("Link $NAME so its preferred codec is applied when it connects.").assertExists()
-        text("LDAC").assertExists()
+    fun anUnreadableCodecsCardDoesntExpand() {
+        show(hidden)
+        compose.onNodeWithTag("device_$ADDRESS").assertHasNoClickAction()
+        text("Codec").assertDoesNotExist()
     }
 
     @Test
-    fun noLinkPromptWithoutPreferredCodec() {
+    fun aReadableCodecWithoutLinkShowsTheChipAndExpandedTheBanner() {
+        // The API 34 and 35 state: readable, choosing a codec or saving it asks to link
         show(device(associated = false, associationRequired = true))
+        text("LDAC").assertExists()
+        text("Not linked").assertExists()
         compose.onNodeWithTag("link_device").assertDoesNotExist()
+        compose.onNodeWithTag("link_banner").assertDoesNotExist()
+        expand()
+        text("Changing the codec or saving it as preferred asks to link this device first.").assertExists()
+        compose.onNodeWithTag("link_device").assertDoesNotExist()
+    }
+
+    @Test
+    fun aPreferredCodecWithoutLinkSaysItIsntApplied() {
+        // Only if the link was removed after saving
+        show(device(associated = false, associationRequired = true, preferred = ldac()))
+        compose.onNodeWithTag("preferred_chip", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag("link_chip", useUnmergedTree = true).assertExists()
+        expand()
+        text("The preferred codec is only applied when this device connects once it's linked. " +
+            "Changing or restoring the codec asks to link it.").assertExists()
+    }
+
+    @Test
+    fun aLinkedDeviceHasNoLinkChip() {
+        show(device())
+        compose.onNodeWithTag("link_chip", useUnmergedTree = true).assertDoesNotExist()
+        expand()
+        compose.onNodeWithTag("link_banner").assertDoesNotExist()
     }
 
     @Test
     fun phonesWithoutTheCompanionFeatureCantLink() {
-        show(device(statusReadable = false, codec = null, android = null, associated = false, associationRequired = true),
-            canAssociate = false)
-        text("This phone can't link devices, so the codec of $NAME can't be changed.").assertExists()
+        show(hidden, canAssociate = false)
+        text("This phone can't link devices, so the codec can't be read or changed.").assertExists()
         compose.onNodeWithTag("link_device").assertDoesNotExist()
     }
 
     @Test
-    fun allowIsDisabledWhileLinking() {
-        show(device(statusReadable = false, codec = null, android = null, associated = false, associationRequired = true),
-            associationInProgress = true)
+    fun phonesWithoutTheCompanionFeatureSayItForAReadableCodec() {
+        show(device(associated = false, associationRequired = true), canAssociate = false)
+        text("Can't link").assertExists()
+        expand()
+        text("This phone can't link devices, so the codec can't be changed.").assertExists()
+    }
+
+    @Test
+    fun theLinkButtonSpinsWhileLinking() {
+        show(hidden, linkingAddress = ADDRESS)
         compose.onNodeWithTag("link_device").assertIsNotEnabled()
+        text("Linking…").assertExists()
+    }
+
+    @Test
+    fun theLinkButtonWaitsWhileAnotherDeviceLinks() {
+        show(hidden, linkingAddress = "00:11:22:33:44:55")
+        compose.onNodeWithTag("link_device").assertIsNotEnabled()
+        text("Link Device").assertExists()
+    }
+
+    @Test
+    fun theLinkChipSaysLinkingWhileLinking() {
+        show(device(associated = false, associationRequired = true), linkingAddress = ADDRESS)
+        text("Linking…").assertExists()
     }
 
     // V6

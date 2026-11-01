@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -85,6 +86,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -128,7 +130,8 @@ internal data class MainScreenState(
     val permissionState: PermissionState,
     val devices: List<DeviceData>,
     val canAssociate: Boolean,
-    val associationInProgress: Boolean,
+    // The device a link is being requested for, null if none
+    val linkingAddress: String?,
     val showDevelopmentOptions: Boolean,
 )
 
@@ -246,7 +249,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                         permissionState = permissionState,
                         devices = connectedDevices,
                         canAssociate = PermissionUtil.canAssociate(this),
-                        associationInProgress = associationInProgress,
+                        linkingAddress = linkingAddress,
                         showDevelopmentOptions = showDevelopmentOptions
                     ),
                     actions
@@ -326,7 +329,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         pullBluetoothState()
     }
 
-    private var associationInProgress by mutableStateOf(false)
+    private var linkingAddress by mutableStateOf<String?>(null)
+    private val associationInProgress get() = linkingAddress != null
     private var onAssociated: (() -> Unit)? = null
     private var onAssociationFailed: ((String?) -> Unit)? = null
 
@@ -343,7 +347,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         val companionManager = getSystemService(CompanionDeviceManager::class.java)
         val filter = BluetoothDeviceFilter.Builder().setAddress(device.address).build()
         val request = AssociationRequest.Builder().setSingleDevice(true).addDeviceFilter(filter).build()
-        associationInProgress = true
+        linkingAddress = device.address
         onAssociated = {
             CompanionPresence.update(this, device)
             onSuccess()
@@ -386,7 +390,7 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     private fun finishAssociation(success: Boolean, message: CharSequence?) {
         if (!associationInProgress)
             return
-        associationInProgress = false
+        linkingAddress = null
         val action = onAssociated
         val failureAction = onAssociationFailed
         onAssociated = null
@@ -611,7 +615,7 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
 }
 
 @Composable
-internal fun ActiveConfigChip(text: String) {
+private fun ActiveConfigChip(text: String) {
     ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
@@ -663,12 +667,12 @@ private fun preferredSlots(device: DeviceData): List<PreferredSlot> {
 
 /** The size of the icons in the preferred codec's row, 18 dp at the normal font size, growing with the labels. */
 @Composable
-internal fun preferredIconSize(): Dp =
+private fun preferredIconSize(): Dp =
     with(LocalDensity.current) { (MaterialTheme.typography.labelLarge.fontSize * (18f / 14f)).toDp() }
 
 /** The icon and the label of an action, or just the icon, which is then as tall as the label would be. */
 @Composable
-internal fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
+private fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
     val style = MaterialTheme.typography.labelLarge
     Row(
         Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -739,7 +743,7 @@ private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
  * keeps its height whatever is available.
  */
 @Composable
-internal fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
+private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
     val slots = preferredSlots(device)
     if (slots.isEmpty())
         return
@@ -879,7 +883,7 @@ private fun isSampleSizeSelectable(device: DeviceData, config: CodecConfig, @Cod
 }
 
 @Composable
-internal fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
+private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfig) -> Unit) {
     Column {
         val currentCodecType = device.codecConfig?.getCodecType() ?: CodecConfig.CODEC_TYPE_INVALID
         ConfigSelectRow(
@@ -980,10 +984,17 @@ internal fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConf
     }
 }
 
-/** The collapsed card's chips: the codec, then the preferred codec's chip while it's active, then [extra]. */
+/**
+ * The collapsed card's chips: the codec, then the preferred codec's chip while it's active, then the link's while
+ * the device isn't linked. Last, so the codec's chips stay where they are when they come and go.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun CodecChips(device: DeviceData, extra: @Composable () -> Unit = {}) {
+private fun CodecChips(device: DeviceData, state: MainScreenState) {
+    val extra = @Composable {
+        if (device.associationRequired)
+            LinkChip(linking = state.linkingAddress == device.address, canLink = state.canAssociate)
+    }
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1013,7 +1024,6 @@ internal fun CodecChips(device: DeviceData, extra: @Composable () -> Unit = {}) 
                         ?.let { ActiveConfigChip("${it.first}/${it.second} kbps") }
             }
         }
-        // Last, so the codec's chips stay where they are when it comes and goes
         if (device.preferredConfig == config) {
             PreferredChip()
         }
@@ -1021,18 +1031,11 @@ internal fun CodecChips(device: DeviceData, extra: @Composable () -> Unit = {}) 
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: MainScreenState, actions: MainScreenActions) {
     var extended by remember { mutableStateOf(initialExtended) }
-
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(16.dp).testTag(deviceTag(device)),
-        shadowElevation = 6.dp,
-        shape = CardDefaults.elevatedShape,
-        onClick = { extended = !extended },
-        enabled = true
-    ) {
+    val modifier = Modifier.fillMaxWidth().padding(16.dp).testTag(deviceTag(device))
+    val content = @Composable {
         Column(modifier = Modifier.padding(10.dp)) {
             // The name has the header to itself, the preferred codec is below the codec
             Row(
@@ -1051,17 +1054,19 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                 }
             }
             Spacer(Modifier.height(8.dp))
-            // Choosing a codec requests the association anyway, so only ask up front if the
-            // codec can't be shown or the preferred codec can't be applied automatically
-            if (!device.statusReadable || (device.associationRequired && device.preferredConfig != null)) {
-                AssociationRow(device, state.canAssociate, state.associationInProgress, actions)
-                Spacer(Modifier.height(8.dp))
+            if (!device.statusReadable) {
+                LinkPrompt(device, state, actions)
+                return@Column
             }
-            AnimatedVisibility(!extended && device.statusReadable) {
-                CodecChips(device)
+            AnimatedVisibility(!extended) {
+                CodecChips(device, state)
             }
-            AnimatedVisibility(extended && device.statusReadable) {
+            AnimatedVisibility(extended) {
                 Column {
+                    if (device.associationRequired) {
+                        LinkBanner(device, state.canAssociate)
+                        Spacer(Modifier.height(16.dp))
+                    }
                     CodecConfigSelection(
                         device,
                         onConfigChange = { actions.setCodec(device.address, it) }
@@ -1070,6 +1075,18 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                 }
             }
         }
+    }
+    // Without a codec there's nothing to expand, the card always shows how to link the device
+    if (device.statusReadable) {
+        Surface(
+            onClick = { extended = !extended },
+            modifier = modifier,
+            shadowElevation = 6.dp,
+            shape = CardDefaults.elevatedShape,
+            content = content
+        )
+    } else {
+        Surface(modifier = modifier, shadowElevation = 6.dp, shape = CardDefaults.elevatedShape, content = content)
     }
 }
 
@@ -1097,28 +1114,117 @@ private fun DeviceMenu(device: DeviceData, actions: MainScreenActions) {
     }
 }
 
+/** The link's chip after the codec's: "Not linked" or "Linking…" in amber, "Can't link" in grey. */
 @Composable
-private fun AssociationRow(device: DeviceData, canAssociate: Boolean, associationInProgress: Boolean, actions: MainScreenActions) {
-    Column {
-        if (!canAssociate) {
+private fun LinkChip(linking: Boolean, canLink: Boolean) {
+    val (container, content) =
+        if (canLink) AppColors.status.attentionContainer to AppColors.status.onAttentionContainer
+        else MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = container,
+        contentColor = content,
+        modifier = Modifier.testTag("link_chip")
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (linking) {
+                CircularProgressIndicator(Modifier.size(14.dp), color = content, strokeWidth = 2.dp)
+            } else {
+                Icon(ImageVector.vectorResource(R.drawable.ic_link_off), contentDescription = null,
+                    modifier = Modifier.size(16.dp))
+            }
+            Spacer(Modifier.width(6.dp))
             Text(
-                "This phone can't link devices, so the codec of ${device.name} can't be changed.",
+                when {
+                    linking -> "Linking…"
+                    canLink -> "Not linked"
+                    else -> "Can't link"
+                },
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
+    }
+}
+
+/**
+ * The card of a device whose codec can only be read once it's linked: why, and "Link Device" where the lone Save
+ * button would be, as wide as the row up to 420 dp. While linking it spins instead, while another device links it
+ * waits. Without the companion feature there's only the text.
+ */
+@Composable
+private fun LinkPrompt(device: DeviceData, state: MainScreenState, actions: MainScreenActions) {
+    Column {
+        if (!state.canAssociate) {
+            Text(
+                "This phone can't link devices, so the codec can't be read or changed.",
                 style = MaterialTheme.typography.bodyMedium
             )
             return@Column
         }
-        Text(
-            if (device.statusReadable) "Link ${device.name} so its preferred codec is applied when it connects."
-            else "Link ${device.name} to see and change its codec.",
-            style = MaterialTheme.typography.bodyMedium
-        )
+        Text("Link this device to see and change its codec.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
-        Button(
+        val linking = state.linkingAddress == device.address
+        val waiting = state.linkingAddress != null && !linking
+        val scheme = MaterialTheme.colorScheme
+        Surface(
             onClick = { actions.link(device.address) },
-            modifier = Modifier.testTag("link_device"),
-            enabled = !associationInProgress
+            enabled = state.linkingAddress == null,
+            shape = CircleShape,
+            color = scheme.primaryContainer,
+            contentColor = scheme.onPrimaryContainer,
+            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
+                .graphicsLayer(alpha = if (waiting) 0.38f else 1f)
+                .semantics { role = Role.Button }.testTag("link_device")
         ) {
-            Text("Allow")
+            if (linking) {
+                Row(
+                    Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(Modifier.size(preferredIconSize()), color = scheme.onPrimaryContainer,
+                        strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Linking…", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                }
+            } else {
+                PreferredContent("Link Device", ImageVector.vectorResource(R.drawable.ic_link), showLabel = true)
+            }
+        }
+    }
+}
+
+/**
+ * Tops the expanded card of a readable device that isn't linked, in the "Not linked" chip's amber. Choosing a codec
+ * or saving it asks to link first, so it has no button. In grey if the phone can't link.
+ */
+@Composable
+private fun LinkBanner(device: DeviceData, canLink: Boolean) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (canLink) AppColors.status.attentionContainer else scheme.surfaceVariant,
+        contentColor = if (canLink) AppColors.status.onAttentionContainer else scheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().testTag("link_banner")
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(ImageVector.vectorResource(R.drawable.ic_link_off), contentDescription = null,
+                modifier = Modifier.size(preferredIconSize()))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                when {
+                    !canLink -> "This phone can't link devices, so the codec can't be changed."
+                    // Only if the link was removed after saving, since saving asks to link
+                    device.preferredConfig != null ->
+                        "The preferred codec is only applied when this device connects once it's linked. " +
+                            "Changing or restoring the codec asks to link it."
+                    else -> "Changing the codec or saving it as preferred asks to link this device first."
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
