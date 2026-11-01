@@ -58,10 +58,11 @@ import com.tt.autobluetoothcodec.SampleData.sony
 
 /*
  * Prototypes for the device card without the status button in its header. Collapsed, the card shows a "Preferred
- * Codec" chip after the codec chips while the preferred codec is active (chosen). Expanded, it has three equal slots
- * for saving, restoring and deleting the preferred codec at its bottom (chosen); these prototypes try colors, button
- * styles, ways to show that the preferred codec is active, and a wide Save button when nothing is saved. Only the
- * parts that differ are prototyped, the codec chips and the codec selection are the app's own.
+ * Codec" chip after the codec chips while the preferred codec is active. Expanded, it has three equal slots at its
+ * bottom and only shows what's available: a wide Save when nothing is saved, an "Active" label as wide as two slots
+ * and Clear while the preferred codec is active, and Save, Restore and Clear when it differs. These prototypes try
+ * colors for Save and layouts for rows too narrow for three labels. Only the parts that differ are prototyped, the
+ * codec chips and the codec selection are the app's own.
  */
 
 /** The preferred codec's state, which decides which actions are available. */
@@ -79,106 +80,105 @@ private fun stateOf(device: DeviceData) = when {
 
 /** How the action buttons are drawn. */
 internal enum class ButtonStyle(val title: String) {
-    MONO("Monochrome outline"),
     OUTLINE("Colored outline"),
-    ICON("Colored icons"),
     TONAL("Tonal"),
-    TONAL_OUTLINE("Tonal with outline"),
-    FILLED("Filled"),
 }
 
-/** How the Save slot looks while the preferred codec is active. */
-internal enum class ActiveTreatment {
-    /** Save is disabled like Restore. */
-    DISABLED,
-    /** Save turns into "Saved" with a check mark and stays enabled. */
-    SAVED,
-    /** Save and Restore make way for one "Active" label as wide as both. */
-    SPAN,
-    /** Like [SPAN], shaped like the collapsed card's chip instead of a button. */
-    SPAN_CHIP,
+/** The color of Save. */
+internal enum class SaveColor(val title: String) {
+    GOLD("Gold"),
+    AMBER("Amber"),
+    GOLD_STAR("Neutral, gold star"),
+    PRIMARY("Theme purple"),
+}
+
+/** How the row looks when the labels of three buttons don't fit in a third of it. */
+internal enum class NarrowLayout(val title: String) {
+    /** Save and Restore on the first row, Clear under Restore on the second. */
+    TWO_ROWS("Two rows"),
+    /** Every button and the Active label only show their icons. */
+    ICONS("Icons only"),
+    /** The one-slot buttons only show their icons, the wider Active label and Save keep their labels. */
+    MIXED("Icons where needed"),
 }
 
 /** One combination of the experiments. */
 internal class Design(
     val name: String,
     val style: ButtonStyle,
-    val active: ActiveTreatment = ActiveTreatment.DISABLED,
-    /** Whether Save takes the whole row while nothing is saved. */
-    val wideSave: Boolean = false,
+    val saveColor: SaveColor = SaveColor.GOLD,
+    val narrow: NarrowLayout = NarrowLayout.MIXED,
 )
 
 /** What an action is, which decides its color. */
-private enum class ActionRole { SAVE, RESTORE, DELETE, NEUTRAL }
+private enum class ActionRole { SAVE, RESTORE, CLEAR }
 
-/** An action's colors: as text and outline, as a tonal container, and as a filled button. */
-private class RoleColors(val accent: Color, val container: Color, val onContainer: Color, val fill: Color, val onFill: Color)
+/**
+ * An action's colors: [accent] for the label (and the outline and icon unless they're set), [container] and
+ * [onContainer] for the tonal style.
+ */
+private class RoleColors(
+    val accent: Color,
+    val container: Color,
+    val onContainer: Color,
+    val outline: Color = accent,
+    val icon: Color? = null,
+)
 
 @Composable
-private fun roleColors(role: ActionRole): RoleColors {
+private fun roleColors(role: ActionRole, saveColor: SaveColor): RoleColors {
     val scheme = MaterialTheme.colorScheme
     val dark = scheme.surface.luminance() < 0.5f
     return when (role) {
-        // Gold, dark enough for text on a light card
-        ActionRole.SAVE -> if (dark) RoleColors(Color(0xFFF5C542), Color(0xFF5A4300), Color(0xFFFFDF99), Color(0xFFF5C542), Color(0xFF3F2E00))
-            else RoleColors(Color(0xFF8F6A00), Color(0xFFFFDF99), Color(0xFF261A00), Color(0xFFF2B705), Color(0xFF261A00))
-        ActionRole.RESTORE -> if (dark) RoleColors(Color(0xFF8ED793), Color(0xFF1E5124), Color(0xFFB6F2B4), Color(0xFF8ED793), Color(0xFF00390D))
-            else RoleColors(Color(0xFF2E7D32), Color(0xFFC3EFC0), Color(0xFF002106), Color(0xFF2E7D32), Color.White)
-        ActionRole.DELETE -> RoleColors(scheme.error, scheme.errorContainer, scheme.onErrorContainer, scheme.error, scheme.onError)
-        ActionRole.NEUTRAL -> RoleColors(scheme.primary, scheme.secondaryContainer, scheme.onSecondaryContainer, scheme.primary, scheme.onPrimary)
+        ActionRole.SAVE -> when (saveColor) {
+            // Gold, dark enough for text on a light card
+            SaveColor.GOLD -> if (dark) RoleColors(Color(0xFFF5C542), Color(0xFF5A4300), Color(0xFFFFDF99))
+                else RoleColors(Color(0xFF8F6A00), Color(0xFFFFDF99), Color(0xFF261A00))
+            // Warmer, toward orange
+            SaveColor.AMBER -> if (dark) RoleColors(Color(0xFFFFB951), Color(0xFF6A3D00), Color(0xFFFFDDB0))
+                else RoleColors(Color(0xFF9C5700), Color(0xFFFFDDB0), Color(0xFF3E2300))
+            // A neutral button, only the star in gold
+            SaveColor.GOLD_STAR -> RoleColors(
+                scheme.onSurface, scheme.surfaceContainerHigh, scheme.onSurface, outline = scheme.outline,
+                icon = if (dark) Color(0xFFF5C542) else Color(0xFFC48C00)
+            )
+            SaveColor.PRIMARY -> RoleColors(scheme.primary, scheme.primaryContainer, scheme.onPrimaryContainer)
+        }
+        ActionRole.RESTORE -> if (dark) RoleColors(Color(0xFF8ED793), Color(0xFF1E5124), Color(0xFFB6F2B4))
+            else RoleColors(Color(0xFF2E7D32), Color(0xFFC3EFC0), Color(0xFF002106))
+        ActionRole.CLEAR -> RoleColors(scheme.error, scheme.errorContainer, scheme.onErrorContainer)
     }
 }
 
-/** A pill-shaped action in one of the [ButtonStyle]s, disabled like Material's buttons. */
+/** A pill-shaped action in one of the [ButtonStyle]s. */
 @Composable
 private fun ActionButton(
     label: String,
     icon: ImageVector,
     role: ActionRole,
-    style: ButtonStyle,
-    enabled: Boolean,
+    design: Design,
     showLabel: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val c = roleColors(if (style == ButtonStyle.MONO) ActionRole.NEUTRAL else role)
-    var container = Color.Transparent
-    var content = c.accent
-    var iconColor = c.accent
-    var border: Color? = c.accent
-    when (style) {
-        ButtonStyle.MONO -> border = scheme.outline
-        ButtonStyle.OUTLINE -> {}
-        ButtonStyle.ICON -> { content = scheme.onSurface; border = scheme.outline }
-        ButtonStyle.TONAL -> { container = c.container; content = c.onContainer; iconColor = c.onContainer; border = null }
-        ButtonStyle.TONAL_OUTLINE -> { container = c.container; content = c.onContainer; iconColor = c.onContainer }
-        ButtonStyle.FILLED -> { container = c.fill; content = c.onFill; iconColor = c.onFill; border = null }
-    }
-    if (!enabled) {
-        if (container != Color.Transparent)
-            container = scheme.onSurface.copy(alpha = 0.12f)
-        content = scheme.onSurface.copy(alpha = 0.38f)
-        iconColor = content
-        border = border?.let { scheme.onSurface.copy(alpha = 0.12f) }
-    }
+    val c = roleColors(role, design.saveColor)
+    val outlined = design.style == ButtonStyle.OUTLINE
     Surface(
         onClick = {},
-        enabled = enabled,
         shape = CircleShape,
-        color = container,
-        contentColor = content,
-        border = border?.let { BorderStroke(1.dp, it) },
+        color = if (outlined) Color.Transparent else c.container,
+        contentColor = if (outlined) c.accent else c.onContainer,
+        border = if (outlined) BorderStroke(1.dp, c.outline) else null,
         modifier = modifier,
     ) {
-        PillContent(label, icon, iconColor, showLabel)
+        PillContent(label, icon, c.icon ?: if (outlined) c.accent else c.onContainer, showLabel)
     }
 }
 
-/** The label that says the preferred codec is active, in the success colors like the collapsed card's chip. */
+/** The label that says the preferred codec is active, shaped and colored like the collapsed card's chip. */
 @Composable
-private fun ActiveLabel(showLabel: Boolean, chip: Boolean, modifier: Modifier = Modifier) {
+private fun ActiveLabel(showLabel: Boolean, modifier: Modifier = Modifier) {
     Surface(
-        shape = if (chip) RoundedCornerShape(8.dp) else CircleShape,
+        shape = RoundedCornerShape(8.dp),
         color = AppColors.status.successContainer,
         contentColor = AppColors.status.onSuccessContainer,
         modifier = modifier,
@@ -189,51 +189,45 @@ private fun ActiveLabel(showLabel: Boolean, chip: Boolean, modifier: Modifier = 
 
 @Composable
 private fun PillContent(label: String, icon: ImageVector, iconColor: Color, showLabel: Boolean) {
+    val style = MaterialTheme.typography.labelLarge
+    // 18 dp at the normal font size, growing with the label's text
+    val iconSize = with(LocalDensity.current) { (style.fontSize * (18f / 14f)).toDp() }
     Row(
         Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = if (showLabel) null else label, tint = iconColor, modifier = Modifier.size(18.dp))
+        Icon(icon, contentDescription = if (showLabel) null else label, tint = iconColor, modifier = Modifier.size(iconSize))
         if (showLabel) {
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(label, style = style, maxLines = 1)
+        } else {
+            // As tall as a label, so a button with just its icon is as tall as one with its label
+            Text("", style = style)
         }
     }
 }
 
 /** What fills a slot of the action row. */
 private sealed class Cell(val slots: Int) {
-    class Action(val label: String, val icon: ImageVector, val role: ActionRole, val enabled: Boolean, slots: Int = 1) : Cell(slots)
-    class Active(val chip: Boolean, slots: Int) : Cell(slots)
+    class Action(val label: String, val icon: ImageVector, val role: ActionRole, slots: Int = 1) : Cell(slots)
+    class Active(slots: Int) : Cell(slots)
 }
 
-private fun cellsOf(state: PreferredState, design: Design): List<Cell> {
-    if (state == PreferredState.NONE && design.wideSave)
-        return listOf(Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE, true, slots = 3))
-    val delete = Cell.Action("Delete", Icons.Default.Delete, ActionRole.DELETE, state != PreferredState.NONE)
-    if (state == PreferredState.ACTIVE) {
-        when (design.active) {
-            ActiveTreatment.SPAN -> return listOf(Cell.Active(chip = false, slots = 2), delete)
-            ActiveTreatment.SPAN_CHIP -> return listOf(Cell.Active(chip = true, slots = 2), delete)
-            ActiveTreatment.SAVED -> return listOf(
-                Cell.Action("Saved", Icons.Default.Check, ActionRole.SAVE, true),
-                Cell.Action("Restore", Icons.Default.Refresh, ActionRole.RESTORE, false),
-                delete,
-            )
-            ActiveTreatment.DISABLED -> {}
-        }
-    }
-    return listOf(
-        Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE, state != PreferredState.ACTIVE),
-        Cell.Action("Restore", Icons.Default.Refresh, ActionRole.RESTORE, state == PreferredState.DIFFERS),
-        delete,
+/** Only what's available: a wide Save, Active and Clear, or all three actions. */
+private fun cellsOf(state: PreferredState): List<Cell> = when (state) {
+    PreferredState.NONE -> listOf(Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE, slots = 3))
+    PreferredState.ACTIVE -> listOf(Cell.Active(slots = 2), Cell.Action("Clear", Icons.Default.Delete, ActionRole.CLEAR))
+    PreferredState.DIFFERS -> listOf(
+        Cell.Action("Save", Icons.Default.Star, ActionRole.SAVE),
+        Cell.Action("Restore", Icons.Default.Refresh, ActionRole.RESTORE),
+        Cell.Action("Clear", Icons.Default.Delete, ActionRole.CLEAR),
     )
 }
 
 /**
- * Three equal slots, at most 420 dp wide together. If the labels don't fit in a third, as with the largest font on
- * a small phone, Save and Restore share the first row and Delete has the second, so the labels stay.
+ * Three equal slots, at most 420 dp wide together. When the labels of the one-slot buttons don't fit in a third of
+ * the row, as with large fonts or on small phones, the [NarrowLayout] of the design decides.
  */
 @Composable
 private fun SlotActions(state: PreferredState, design: Design) {
@@ -244,38 +238,49 @@ private fun SlotActions(state: PreferredState, design: Design) {
         val density = LocalDensity.current
         val full = maxWidth
         val third = (full - gap * 2) / 3
-        // Icon 18, its gap 8 and the padding 16 on each side
-        val labelsFit = listOf("Save", "Saved", "Restore", "Delete", "Active").all {
-            with(density) { measurer.measure(it, style, softWrap = false).size.width.toDp() } + 18.dp + 8.dp + 32.dp <= third
-        }
-        val cells = cellsOf(state, design)
+        // The icon, its gap 8 and the padding 16 on each side
+        val iconSize = with(density) { (style.fontSize * (18f / 14f)).toDp() }
+        fun fits(label: String, width: Dp) =
+            with(density) { measurer.measure(label, style, softWrap = false).size.width.toDp() } + iconSize + 8.dp + 32.dp <= width
+        // The same for every state, so a button doesn't lose its label when another one appears
+        val thirdsFit = listOf("Save", "Restore", "Clear").all { fits(it, third) }
+        val cells = cellsOf(state)
 
         @Composable
-        fun CellView(cell: Cell, width: Dp) {
+        fun CellView(cell: Cell, width: Dp, showLabel: Boolean) {
             val modifier = Modifier.width(width)
             when (cell) {
-                is Cell.Action -> ActionButton(cell.label, cell.icon, cell.role, design.style, cell.enabled, showLabel = true, modifier)
-                is Cell.Active -> ActiveLabel(showLabel = true, cell.chip, modifier)
+                is Cell.Action -> ActionButton(cell.label, cell.icon, cell.role, design, showLabel, modifier)
+                is Cell.Active -> ActiveLabel(showLabel, modifier)
             }
         }
 
-        if (labelsFit) {
+        fun labelOf(cell: Cell) = if (cell is Cell.Action) cell.label else "Active"
+
+        if (thirdsFit || design.narrow != NarrowLayout.TWO_ROWS) {
             Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
-                for (cell in cells)
-                    CellView(cell, third * cell.slots + gap * (cell.slots - 1))
+                for (cell in cells) {
+                    val width = third * cell.slots + gap * (cell.slots - 1)
+                    val showLabel = when {
+                        thirdsFit -> true
+                        design.narrow == NarrowLayout.ICONS -> false
+                        else -> cell.slots > 1 && fits(labelOf(cell), width)
+                    }
+                    CellView(cell, width, showLabel)
+                }
             }
         } else {
-            // Two columns: the cells of the first two slots on the first row, Delete under Restore on the second
+            // Two columns: Save and Restore, or Active, on the first row, Clear under Restore on the second
             val half = (full - gap) / 2
             Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                val first = cells.filter { it !is Cell.Action || it.label != "Delete" }
-                val delete = cells.firstOrNull { it is Cell.Action && it.label == "Delete" }
+                val first = cells.filter { it !is Cell.Action || it.label != "Clear" }
+                val clear = cells.firstOrNull { it is Cell.Action && it.label == "Clear" }
                 Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                     for (cell in first)
-                        CellView(cell, if (cell.slots >= 2) full else half)
+                        CellView(cell, if (cell.slots >= 2) full else half, showLabel = true)
                 }
-                if (delete != null) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { CellView(delete, half) }
+                if (clear != null) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { CellView(clear, half, showLabel = true) }
                 }
             }
         }
@@ -387,17 +392,10 @@ private fun expandedDevice(state: PreferredState) = when (state) {
     PreferredState.DIFFERS -> device(ldac(CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24), preferred = LDAC_990)
 }
 
-/** The combinations to compare: the styles, then the active state and the wide Save in two of them. */
-internal val prototypeDesigns = ButtonStyle.entries.map { Design(it.title, it) } + listOf(
-    Design("Colored outline, Saved", ButtonStyle.OUTLINE, ActiveTreatment.SAVED),
-    Design("Tonal, Saved", ButtonStyle.TONAL, ActiveTreatment.SAVED),
-    Design("Colored outline, Active across two slots", ButtonStyle.OUTLINE, ActiveTreatment.SPAN),
-    Design("Tonal, Active across two slots", ButtonStyle.TONAL, ActiveTreatment.SPAN),
-    Design("Tonal, Active as a chip", ButtonStyle.TONAL, ActiveTreatment.SPAN_CHIP),
-    Design("Colored outline, Active, wide Save", ButtonStyle.OUTLINE, ActiveTreatment.SPAN, wideSave = true),
-    Design("Tonal, Active, wide Save", ButtonStyle.TONAL, ActiveTreatment.SPAN, wideSave = true),
-    Design("Tonal, Active as a chip, wide Save", ButtonStyle.TONAL, ActiveTreatment.SPAN_CHIP, wideSave = true),
-)
+/** The colors of Save in both styles, then the layouts for narrow rows. */
+internal val prototypeDesigns =
+    ButtonStyle.entries.flatMap { style -> SaveColor.entries.map { Design("${style.title}, ${it.title}", style, it) } } +
+        NarrowLayout.entries.map { Design("Narrow, ${it.title}", ButtonStyle.TONAL, narrow = it) }
 
 /** The collapsed cards with the preferred chip after the codec chips. */
 internal val collapsedPrototype = Scene("Collapsed") { PrototypeScreen(collapsedDevices, null) }
