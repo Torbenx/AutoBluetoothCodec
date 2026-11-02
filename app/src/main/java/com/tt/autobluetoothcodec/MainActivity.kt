@@ -87,6 +87,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
@@ -1290,7 +1291,7 @@ private fun PermissionRequired(modifier: Modifier, permissionState: PermissionSt
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
+internal fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit, includeLog: Boolean = true) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("app_menu")) {
@@ -1299,14 +1300,16 @@ private fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
         // A menu is a popup, outside the Scaffold that exposes the test tags to UiAutomator
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
             modifier = Modifier.semantics { testTagsAsResourceId = true }) {
-            DropdownMenuItem(
-                text = { Text("Log") },
-                modifier = Modifier.testTag("open_log"),
-                onClick = {
-                    expanded = false
-                    onOpenLog()
-                }
-            )
+            if (includeLog) {
+                DropdownMenuItem(
+                    text = { Text("Log") },
+                    modifier = Modifier.testTag("open_log"),
+                    onClick = {
+                        expanded = false
+                        onOpenLog()
+                    }
+                )
+            }
             DropdownMenuItem(
                 text = { Text("About") },
                 modifier = Modifier.testTag("open_about"),
@@ -1329,19 +1332,27 @@ internal fun deviceTag(device: DeviceData) = "device_" + device.address.uppercas
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, initiallyExpanded: Set<String> = emptySet()) {
+    val style = LocalTopBarStyle.current
+    val scrollBehavior = rememberMainScrollBehavior(style)
+    var view by rememberSaveable { mutableStateOf(DeviceView.CONNECTED) }
     Scaffold(
         // Lets UiAutomator find the elements by their test tags
-        modifier = Modifier.semantics { testTagsAsResourceId = true },
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
-                actions = { AppMenu(actions::openLog, actions::openAbout) }
-            )
-        },
+        modifier = Modifier.semantics { testTagsAsResourceId = true }
+            .then(if (scrollBehavior != null) Modifier.nestedScroll(scrollBehavior.nestedScrollConnection) else Modifier),
+        topBar = { MainTopBar(style, scrollBehavior, state.devices.size, view, { view = it }, actions) },
         // Also keeps the content clear of display cutouts in landscape
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
-        if (state.permissionState != PermissionState.GRANTED) {
+        if (view == DeviceView.SAVED) {
+            // Prototype: the saved devices' list isn't designed yet
+            Box(Modifier.fillMaxSize().padding(innerPadding).padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "Prototype: the devices with a saved preferred codec, connected or not, would be listed here.",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (state.permissionState != PermissionState.GRANTED) {
             CappedContent(NARROW_CONTENT, tintSides = false) { side ->
                 PermissionRequired(Modifier.padding(innerPadding).padding(horizontal = side), state.permissionState, actions)
             }
@@ -1349,8 +1360,8 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, init
             CappedContent(NARROW_CONTENT, tintSides = false) { side ->
                 // Padding inside the scroll container, so the cards scroll behind the navigation bar
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(innerPadding)
-                        .padding(horizontal = side)
+                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("device_list")
+                        .padding(innerPadding).padding(horizontal = side)
                 ) {
                     // Keyed, so each card keeps its own saved state
                     for (device in state.devices) key(device.address) {

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.runAndroidComposeUiTest
+import androidx.compose.ui.test.swipeUp
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -109,6 +110,26 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,
                         interaction.second))
+            val smallLarge = Device("Small phone, font 200%", 360, 640, fontScale = 2f)
+            val scrolled: Interaction = { onNodeWithTag("device_list").performTouchInput { swipeUp() } }
+            for (scene in topBarPrototypes) {
+                if (scene.name.endsWith("Long list")) {
+                    val name = "${scene.name}, scrolled"
+                    for (device in listOf(PHONE, PHONE_DARK))
+                        shots.add(Shot("5 Prototypes", Scene(name, scene.content), device, scrolled))
+                } else {
+                    for (device in listOf(PHONE, PHONE_DARK, smallLarge))
+                        shots.add(Shot("5 Prototypes", scene, device))
+                }
+                if (scene.name == "Top bar, Dropdown, Two devices")
+                    for (device in listOf(PHONE, PHONE_DARK))
+                        shots.add(Shot("5 Prototypes", Scene("${scene.name}, menu open", scene.content), device,
+                            { onNodeWithTag("device_view").performClick() }))
+                if (scene.name == "Top bar, Tabs, Two devices")
+                    for (device in listOf(PHONE, PHONE_DARK))
+                        shots.add(Shot("5 Prototypes", Scene("${scene.name}, saved", scene.content), device,
+                            { onNodeWithTag("tab_saved").performClick() }))
+            }
             return shots
         }
 
