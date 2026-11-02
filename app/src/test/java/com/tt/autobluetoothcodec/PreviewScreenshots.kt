@@ -112,7 +112,32 @@ internal class PreviewScreenshots(private val shot: Shot) {
                         interaction.second))
             val smallLarge = Device("Small phone, font 200%", 360, 640, fontScale = 2f)
             val scrolled: Interaction = { onNodeWithTag("device_list").performTouchInput { swipeUp() } }
+            // Like Google Calendar in split screen: a phone's half in landscape, at the normal and the largest font
+            val split = Device("Split screen", 300, 411)
+            val splitLarge = Device("Split screen, font 200%", 300, 411, fontScale = 2f)
+            val narrowLarge = Device("Narrow split screen, font 200%", 240, 411, fontScale = 2f)
+            val open: Interaction = { onNodeWithTag("device_view").performClick() }
             for (scene in topBarPrototypes) {
+                if (scene.name.startsWith("Top bar, Toggle") || scene.name.startsWith("Top bar, Dropdown")) {
+                    if (scene.name.endsWith("Long list"))
+                        continue
+                    val toggle = scene.name.startsWith("Top bar, Toggle")
+                    for (device in listOf(PHONE, PHONE_DARK, smallLarge, split, splitLarge, narrowLarge)) {
+                        shots.add(Shot("5 Prototypes", scene, device))
+                        if (toggle) {
+                            shots.add(Shot("5 Prototypes", Scene("${scene.name}, open", scene.content), device, open))
+                            if (device === PHONE || device === PHONE_DARK || device === split)
+                                shots.add(Shot("5 Prototypes", Scene("${scene.name}, saved", scene.content), device, {
+                                    open()
+                                    onNodeWithTag("view_saved").performClick()
+                                }))
+                        }
+                    }
+                    if (!toggle)
+                        for (device in listOf(PHONE, PHONE_DARK))
+                            shots.add(Shot("5 Prototypes", Scene("${scene.name}, menu open", scene.content), device, open))
+                    continue
+                }
                 if (scene.name.endsWith("Long list")) {
                     val name = "${scene.name}, scrolled"
                     for (device in listOf(PHONE, PHONE_DARK))
@@ -121,10 +146,6 @@ internal class PreviewScreenshots(private val shot: Shot) {
                     for (device in listOf(PHONE, PHONE_DARK, smallLarge))
                         shots.add(Shot("5 Prototypes", scene, device))
                 }
-                if (scene.name == "Top bar, Dropdown, Two devices")
-                    for (device in listOf(PHONE, PHONE_DARK))
-                        shots.add(Shot("5 Prototypes", Scene("${scene.name}, menu open", scene.content), device,
-                            { onNodeWithTag("device_view").performClick() }))
                 if (scene.name == "Top bar, Tabs, Two devices")
                     for (device in listOf(PHONE, PHONE_DARK))
                         shots.add(Shot("5 Prototypes", Scene("${scene.name}, saved", scene.content), device,

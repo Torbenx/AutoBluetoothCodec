@@ -20,6 +20,8 @@ internal val topBarStyles = listOf(
     "Large" to TopBarStyle.LARGE,
     "Dropdown" to TopBarStyle.DROPDOWN,
     "Tabs" to TopBarStyle.TABS,
+    "Toggle, chips" to TopBarStyle.TOGGLE_CHIPS,
+    "Toggle, segmented" to TopBarStyle.TOGGLE_SEGMENTED,
 )
 
 /** Two devices, and a list longer than the screen with its first card expanded, to scroll. */
