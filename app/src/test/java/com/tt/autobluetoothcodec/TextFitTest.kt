@@ -41,7 +41,7 @@ internal class TextFitTest(private val case: Case) {
         )
 
         /** Texts known to be cut off, not fixed yet: with the largest font on a small phone the top bars' titles don't fit. */
-        private val KNOWN_CUT_OFF = setOf("Auto Bluetooth Codec", "Third-party licenses")
+        private val KNOWN_CUT_OFF = setOf("Third-party licenses")
 
         @JvmStatic
         @Parameters(name = "{0}")

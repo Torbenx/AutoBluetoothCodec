@@ -68,6 +68,32 @@ class MainScreenTest {
         assertEquals(listOf("openAppSettings"), actions.calls)
     }
 
+    // The top bar
+
+    @Test
+    fun theTitleNamesTheListAndOpensTheSwitch() {
+        show(device())
+        text("Connected devices").assertExists()
+        compose.onNodeWithTag("list_saved").assertDoesNotExist()
+        compose.onNodeWithTag("list_toggle").performClick()
+        compose.onNodeWithTag("list_connected").assertExists()
+        compose.onNodeWithTag("list_saved").assertExists()
+        compose.onNodeWithTag("list_toggle").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("list_saved").assertDoesNotExist()
+    }
+
+    @Test
+    fun theSavedListIsEmptyForNow() {
+        show(device())
+        compose.onNodeWithTag("list_toggle").performClick()
+        compose.onNodeWithTag("list_saved").performClick()
+        text("Saved devices").assertExists()
+        text(NAME).assertDoesNotExist()
+        compose.onNodeWithTag("list_connected").performClick()
+        text(NAME).assertExists()
+    }
+
     // V2
 
     @Test
