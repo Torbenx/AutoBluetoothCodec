@@ -83,7 +83,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -609,86 +608,20 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 // Not const, a constant false condition would prevent the smart casts in the guarded blocks
 private val SHOW_UNCONFIGURABLE_OPTIONS = false
 
-/** Prototype: the color of a selected chip, from the quietest to the loudest. */
-internal enum class SelectedFill {
-    /** Material's filter chip, tone 90 of the low-chroma secondary palette in light mode. */
-    SECONDARY_CONTAINER,
-    /** Tone 90 of the theme's color in light mode, tone 30 in dark mode, the color of Save. */
-    PRIMARY_CONTAINER,
-    /** Tone 80 of the theme's color in light mode, tone 40 in dark mode. */
-    INVERSE_PRIMARY,
-    /** The low-chroma secondary color, tone 40 in light mode, tone 80 in dark mode. */
-    SECONDARY,
-    /** The theme's color, tone 40 in light mode, tone 80 in dark mode. */
-    PRIMARY,
-}
-
 /**
- * Prototype: how chips show what's selected, without a fill today's outline. The others are outlined faintly, or
- * in grey with [greyUnselected]. The prototypes also give the preferred codec's chip Restore's stronger green.
+ * A chip of the codec's values. The selected one is filled in the inverse primary color, the theme's color at tone 80
+ * in light mode and 40 in dark mode: a step stronger than Save's container, without outshouting the buttons. The
+ * others are faintly outlined. The collapsed card's chips look like the selected ones, but can't be chosen.
  */
-internal data class ChipStyle(val fill: SelectedFill? = null, val greyUnselected: Boolean = false,
-    val paleActive: Boolean = false)
-
-/** Prototype: the chip style to try. */
-internal val LocalChipStyle = staticCompositionLocalOf { ChipStyle() }
-
-/** A chip of the codec's values. The collapsed card's chips look like the selected ones, but can't be chosen. */
 @Composable
 private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clickable: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val style = LocalChipStyle.current
-    val container: Color
-    val content: Color
-    val border: Color?
-    when {
-        style.fill == null -> {
-            content = if (selected) scheme.primary else scheme.onBackground
-            container = Color.Transparent
-            border = content
-        }
-        selected -> {
-            border = null
-            when (style.fill) {
-                SelectedFill.SECONDARY_CONTAINER -> {
-                    container = scheme.secondaryContainer
-                    content = scheme.onSecondaryContainer
-                }
-                SelectedFill.PRIMARY_CONTAINER -> {
-                    container = scheme.primaryContainer
-                    content = scheme.onPrimaryContainer
-                }
-                SelectedFill.INVERSE_PRIMARY -> {
-                    container = scheme.inversePrimary
-                    content = LocalOnInversePrimary.current ?: scheme.onPrimaryContainer
-                }
-                SelectedFill.SECONDARY -> {
-                    container = scheme.secondary
-                    content = scheme.onSecondary
-                }
-                SelectedFill.PRIMARY -> {
-                    container = scheme.primary
-                    content = scheme.onPrimary
-                }
-            }
-        }
-        style.greyUnselected -> {
-            container = scheme.surfaceContainerHighest
-            content = scheme.onSurfaceVariant
-            border = null
-        }
-        else -> {
-            container = Color.Transparent
-            content = scheme.onSurfaceVariant
-            border = scheme.outlineVariant
-        }
-    }
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
             shape = RoundedCornerShape(8.dp),
-            color = container,
-            contentColor = content,
-            border = border?.let { BorderStroke(1.dp, it) },
+            color = if (selected) scheme.inversePrimary else Color.Transparent,
+            contentColor = if (selected) scheme.onPrimaryContainer else scheme.onSurfaceVariant,
+            border = if (selected) null else BorderStroke(1.dp, scheme.outlineVariant),
             enabled = clickable,
             onClick = onClick,
             modifier = Modifier.graphicsLayer(alpha = if (enabled) 1f else 0.38f)
@@ -698,25 +631,21 @@ private fun ConfigChip(text: String, selected: Boolean, enabled: Boolean, clicka
     }
 }
 
-/** Prototype: the preferred codec's green, Restore's stronger one in the prototyped chip styles. */
-@Composable
-private fun preferredColors(pale: Boolean = false): Pair<Color, Color> =
-    if (LocalChipStyle.current.fill != null && !pale)
-        AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
-    else AppColors.status.successContainer to AppColors.status.onSuccessContainer
-
 @Composable
 private fun ActiveConfigChip(text: String) {
     ConfigChip(text = text, selected = true, enabled = true, onClick = {}, clickable = false)
 }
 
-/** The chip of the collapsed card that says the preferred codec is active, after the codec's chips. */
+/**
+ * The chip of the collapsed card that says the preferred codec is active, after the codec's chips, in Restore's green,
+ * which holds its own among the filled codec chips.
+ */
 @Composable
 private fun PreferredChip() {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = preferredColors().first,
-        contentColor = preferredColors().second,
+        color = AppColors.status.restoreContainer,
+        contentColor = AppColors.status.onRestoreContainer,
         modifier = Modifier.testTag("preferred_chip")
     ) {
         Row(
@@ -814,14 +743,16 @@ private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, m
     }
 }
 
-/** Says that the preferred codec is active, shaped and colored like the collapsed card's chip. */
+/**
+ * Says that the preferred codec is active, shaped like the collapsed card's chip but in the pale green, so it stays a
+ * label among the buttons and doesn't invite a tap.
+ */
 @Composable
 private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        // Prototype: the pale green of round 1, to tell it from Restore
-        color = preferredColors(LocalChipStyle.current.paleActive).first,
-        contentColor = preferredColors(LocalChipStyle.current.paleActive).second,
+        color = AppColors.status.successContainer,
+        contentColor = AppColors.status.onSuccessContainer,
         modifier = modifier.testTag("preferred_active")
     ) {
         PreferredContent("Active", Icons.Default.Check, showLabel)
@@ -1169,10 +1100,9 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
             }
         }
     }
+    // Material's elevated card color, the shadow alone doesn't show in dark mode
+    val color = MaterialTheme.colorScheme.surfaceContainerLow
     // Without a codec there's nothing to expand, the card always shows how to link the device
-    // Prototype: the palettes put the cards on Material's elevated card color
-    val color = if (LocalPaletteOverride.current != null) MaterialTheme.colorScheme.surfaceContainerLow
-        else MaterialTheme.colorScheme.surface
     if (device.statusReadable) {
         Surface(
             onClick = { extended = !extended },
