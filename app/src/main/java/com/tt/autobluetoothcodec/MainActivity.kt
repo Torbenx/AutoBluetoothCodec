@@ -83,6 +83,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -97,6 +98,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -664,6 +666,7 @@ private enum class PreferredAction(val label: String, val icon: ImageVector, val
     SAVE("Save", Icons.Default.Star, "save_preferred"),
     RESTORE("Restore", Icons.Default.Refresh, "restore_preferred"),
     CLEAR("Clear", Icons.Default.Delete, "clear_preferred"),
+    REPLACE("Replace", Icons.Default.Star, "replace_preferred"),
 }
 
 /** An action, or the "Active" label if [action] is null, taking [slots] of the three slots of the row. */
@@ -681,7 +684,7 @@ private fun preferredSlots(device: DeviceData): List<PreferredSlot> {
         preferred == current -> listOf(PreferredSlot(null, 2), PreferredSlot(PreferredAction.CLEAR, 1))
         // A codec unknown to this app can't be saved
         current == null -> listOf(PreferredSlot(PreferredAction.RESTORE, 2), PreferredSlot(PreferredAction.CLEAR, 1))
-        else -> PreferredAction.entries.map { PreferredSlot(it, 1) }
+        else -> listOf(PreferredAction.SAVE, PreferredAction.RESTORE, PreferredAction.CLEAR).map { PreferredSlot(it, 1) }
     }
 }
 
@@ -715,7 +718,7 @@ private fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolea
 private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val (container, content) = when (action) {
-        PreferredAction.SAVE -> scheme.primaryContainer to scheme.onPrimaryContainer
+        PreferredAction.SAVE, PreferredAction.REPLACE -> scheme.primaryContainer to scheme.onPrimaryContainer
         PreferredAction.RESTORE -> AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
         PreferredAction.CLEAR -> scheme.errorContainer to scheme.onErrorContainer
     }
@@ -785,7 +788,7 @@ private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions
             fun fits(label: String, width: Dp) =
                 with(density) { measurer.measure(label, style, softWrap = false).size.width.toDp() } + around <= width
             // Decided for all three, so a button doesn't lose its label when another one appears
-            val thirdsFit = PreferredAction.entries.all { fits(it.label, third) }
+            val thirdsFit = listOf(PreferredAction.SAVE, PreferredAction.RESTORE, PreferredAction.CLEAR).all { fits(it.label, third) }
             Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
                 for (slot in slots) {
                     val width = third * slot.slots + gap * (slot.slots - 1)
@@ -797,11 +800,140 @@ private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions
                     } else {
                         PreferredActionButton(action, showLabel, modifier) {
                             when (action) {
-                                PreferredAction.SAVE -> device.codecConfig?.let { actions.savePreferred(device.address, it) }
+                                PreferredAction.SAVE, PreferredAction.REPLACE -> device.codecConfig?.let { actions.savePreferred(device.address, it) }
                                 PreferredAction.RESTORE -> device.preferredConfig?.let { actions.restorePreferred(device.address, it) }
                                 PreferredAction.CLEAR -> actions.deletePreferred(device.address)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Where the prototyped preferred codec banner sits in the expanded card. */
+internal enum class BannerPosition { TOP, BOTTOM }
+
+/** How the prototyped banner shows the preferred codec. */
+internal enum class BannerContent { TEXT, CHIPS }
+
+/** A prototype of the preferred codec as a banner, instead of today's row of buttons. */
+internal data class PreferredBannerStyle(val position: BannerPosition, val content: BannerContent, val twoActions: Boolean)
+
+/** The prototype the expanded cards show, or null for today's design. */
+internal val LocalPreferredBannerStyle = staticCompositionLocalOf<PreferredBannerStyle?> { null }
+
+/** The collapsed card's chip labels for [config]: the codec, its sample rate and sample size, and LDAC's bitrate. */
+private fun configChipLabels(config: CodecConfig): List<String> {
+    val labels = ArrayList<String>()
+    CodecConfig.getCodecName(config.getCodecType())?.let { labels.add(it) }
+    CodecConfig.getSampleRate(config.sampleRate)?.let { labels.add("$it Hz") }
+    CodecConfig.getBitsPerSample(config.bitsPerSample)?.let { labels.add("$it bits/sample") }
+    if (config is LDACCodecConfig) {
+        if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE || config.bitrate == LDACCodecConfig.BITRATE_SYSTEM_DEFAULT) {
+            labels.add("Adaptive")
+        } else {
+            LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)?.let { labels.add("$it kbps") }
+        }
+    }
+    return labels
+}
+
+/** The banner's actions, by state: Save while nothing is saved, Clear while it's active, otherwise Restore. */
+private fun bannerActions(device: DeviceData, twoActions: Boolean): List<PreferredAction> {
+    val current = device.codecConfig
+    val preferred = device.preferredConfig
+    return when {
+        preferred == null -> if (current != null) listOf(PreferredAction.SAVE) else emptyList()
+        preferred == current -> listOf(PreferredAction.CLEAR)
+        // A codec unknown to this app can't replace the preferred one
+        twoActions && current != null -> listOf(PreferredAction.REPLACE, PreferredAction.RESTORE)
+        else -> listOf(PreferredAction.RESTORE)
+    }
+}
+
+/**
+ * The preferred codec as a banner: an icon, a title and the codec as text or chips, with its action at the end of the
+ * title, or both actions below the codec. Pale green while the preferred codec is active, otherwise a step darker than
+ * the card.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, actions: MainScreenActions) {
+    val bannerActions = bannerActions(device, style.twoActions)
+    if (bannerActions.isEmpty())
+        return
+    val preferred = device.preferredConfig
+    val active = preferred != null && preferred == device.codecConfig
+    val scheme = MaterialTheme.colorScheme
+    val onClick = { action: PreferredAction ->
+        when (action) {
+            PreferredAction.SAVE, PreferredAction.REPLACE ->
+                device.codecConfig?.let { actions.savePreferred(device.address, it) }
+            PreferredAction.RESTORE -> preferred?.let { actions.restorePreferred(device.address, it) }
+            PreferredAction.CLEAR -> actions.deletePreferred(device.address)
+        }
+        Unit
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (active) AppColors.status.successContainer else scheme.surfaceContainerHighest,
+        contentColor = if (active) AppColors.status.onSuccessContainer else scheme.onSurface,
+        modifier = Modifier.fillMaxWidth().testTag("preferred_banner")
+    ) {
+        val iconSize = preferredIconSize()
+        val title = when {
+            preferred == null -> "No preferred codec"
+            active -> "Preferred codec is active"
+            else -> "Preferred codec"
+        }
+        BoxWithConstraints(Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)) {
+            // A lone action goes at the end of the title if both fit on the line, otherwise below the codec
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            fun width(text: String, style: TextStyle) =
+                with(density) { measurer.measure(text, style, softWrap = false).size.width.toDp() }
+            val button = width(bannerActions[0].label, MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp
+            val inline = bannerActions.size == 1 &&
+                iconSize + 12.dp + width(title, MaterialTheme.typography.titleSmall) + 8.dp + button <= maxWidth
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 40.dp)) {
+                    Icon(if (active) Icons.Default.Check else Icons.Default.Star, contentDescription = null,
+                        modifier = Modifier.size(iconSize))
+                    Spacer(Modifier.width(12.dp))
+                    Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    if (inline) {
+                        Spacer(Modifier.width(8.dp))
+                        PreferredActionButton(bannerActions[0], showLabel = true, Modifier) { onClick(bannerActions[0]) }
+                    }
+                }
+                Column(Modifier.padding(start = iconSize + 12.dp, end = 4.dp)) {
+                    if (preferred == null) {
+                        Text("Save the codec to switch to it whenever this device connects.",
+                            style = MaterialTheme.typography.bodyMedium)
+                    } else if (style.content == BannerContent.TEXT) {
+                        Text(preferred.describe(), style = MaterialTheme.typography.bodyMedium)
+                    } else {
+                        Spacer(Modifier.height(4.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            for (label in configChipLabels(preferred))
+                                ActiveConfigChip(label)
+                        }
+                    }
+                }
+                if (!inline) {
+                    Spacer(Modifier.height(12.dp))
+                    FlowRow(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        for (action in bannerActions)
+                            PreferredActionButton(action, showLabel = true, Modifier) { onClick(action) }
                     }
                 }
             }
@@ -1087,15 +1219,27 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
             }
             AnimatedVisibility(extended) {
                 Column {
+                    val bannerStyle = LocalPreferredBannerStyle.current
                     if (device.associationRequired) {
                         LinkBanner(device, state.canAssociate)
+                        Spacer(Modifier.height(16.dp))
+                    }
+                    if (bannerStyle?.position == BannerPosition.TOP && bannerActions(device, bannerStyle.twoActions).isNotEmpty()) {
+                        PreferredBanner(device, bannerStyle, actions)
                         Spacer(Modifier.height(16.dp))
                     }
                     CodecConfigSelection(
                         device,
                         onConfigChange = { actions.setCodec(device.address, it) }
                     )
-                    PreferredCodecActions(device, actions)
+                    when (bannerStyle?.position) {
+                        null -> PreferredCodecActions(device, actions)
+                        BannerPosition.BOTTOM -> if (bannerActions(device, bannerStyle.twoActions).isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            PreferredBanner(device, bannerStyle, actions)
+                        }
+                        BannerPosition.TOP -> {}
+                    }
                 }
             }
         }
