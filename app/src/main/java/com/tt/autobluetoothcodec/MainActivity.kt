@@ -907,7 +907,7 @@ private fun OutlinedBannerButton(label: String, action: PreferredAction, onClick
  * chips' color, which can't be tapped. A codec this app doesn't know can't be saved.
  */
 @Composable
-private fun SeparateSave(device: DeviceData, mode: SaveButton, outlined: Boolean, actions: MainScreenActions) {
+private fun SeparateSave(device: DeviceData, mode: SaveButton, actions: MainScreenActions) {
     val current = device.codecConfig
     val saved = current != null && current == device.preferredConfig
     val canSave = current != null && !saved
@@ -927,9 +927,8 @@ private fun SeparateSave(device: DeviceData, mode: SaveButton, outlined: Boolean
                 onClick = { current?.let { actions.savePreferred(device.address, it) } },
                 enabled = canSave,
                 shape = CircleShape,
-                color = if (outlined) Color.Transparent else scheme.primaryContainer,
-                contentColor = if (outlined) scheme.onSurface else scheme.onPrimaryContainer,
-                border = if (outlined) BorderStroke(1.dp, scheme.outline) else null,
+                color = scheme.primaryContainer,
+                contentColor = scheme.onPrimaryContainer,
                 modifier = modifier.graphicsLayer(alpha = if (canSave) 1f else 0.38f)
                     .semantics { role = Role.Button }.testTag("save_preferred")
             ) {
@@ -1347,7 +1346,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                         }
                         BannerPosition.TOP -> {}
                     }
-                    bannerStyle?.save?.let { SeparateSave(device, it, bannerStyle.outlined, actions) }
+                    bannerStyle?.save?.let { SeparateSave(device, it, actions) }
                 }
             }
         }
