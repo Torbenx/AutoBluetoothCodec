@@ -12,37 +12,29 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 /**
- * Colors Material's color scheme doesn't have: the pale success green of the "Active" label, which says the preferred
- * codec is active and stays a label among the buttons beside it; the stronger green of restoring the preferred codec,
- * which leads there, also the collapsed card's "Preferred Codec" chip, which has to hold its own among the filled
- * codec chips; and amber for a device that isn't linked, which needs attention without being an error.
+ * Colors Material's color scheme doesn't have: the green of the active preferred codec, the collapsed card's
+ * "Preferred Codec" chip, which has to hold its own among the filled codec chips, and the expanded card's banner; and
+ * amber for a device that isn't linked, which needs attention without being an error.
  */
 @Immutable
 internal data class StatusColors(
-    val successContainer: Color,
-    val onSuccessContainer: Color,
-    val restoreContainer: Color,
-    val onRestoreContainer: Color,
+    val preferredContainer: Color,
+    val onPreferredContainer: Color,
     val attentionContainer: Color,
     val onAttentionContainer: Color,
 )
 
 private val lightStatusColors = StatusColors(
-    successContainer = Color(0xFFE8F5E9),
-    // 4.6:1 on the container, readable as text
-    onSuccessContainer = Color(0xFF2E7D32),
-    restoreContainer = Color(0xFFC3EFC0),
-    onRestoreContainer = Color(0xFF002106),
+    preferredContainer = Color(0xFFC3EFC0),
+    onPreferredContainer = Color(0xFF002106),
     attentionContainer = Color(0xFFFFDDB3),
     // 8:1 on the container
     onAttentionContainer = Color(0xFF5C3A00),
 )
 
 private val darkStatusColors = StatusColors(
-    successContainer = Color(0xFF1F3B27),
-    onSuccessContainer = Color(0xFFA8D5B0),
-    restoreContainer = Color(0xFF1E5124),
-    onRestoreContainer = Color(0xFFB6F2B4),
+    preferredContainer = Color(0xFF1E5124),
+    onPreferredContainer = Color(0xFFB6F2B4),
     attentionContainer = Color(0xFF4A3200),
     onAttentionContainer = Color(0xFFFFDDB3),
 )

@@ -67,14 +67,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -83,7 +79,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -639,15 +634,15 @@ private fun ActiveConfigChip(text: String) {
 }
 
 /**
- * The chip of the collapsed card that says the preferred codec is active, after the codec's chips, in Restore's green,
- * which holds its own among the filled codec chips.
+ * The chip of the collapsed card that says the preferred codec is active, after the codec's chips, in the green of the
+ * expanded card's banner, which holds its own among the filled codec chips.
  */
 @Composable
 private fun PreferredChip() {
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = AppColors.status.restoreContainer,
-        contentColor = AppColors.status.onRestoreContainer,
+        color = AppColors.status.preferredContainer,
+        contentColor = AppColors.status.onPreferredContainer,
         modifier = Modifier.testTag("preferred_chip")
     ) {
         Row(
@@ -661,318 +656,52 @@ private fun PreferredChip() {
     }
 }
 
-/** What can be done with a device's preferred codec. */
-private enum class PreferredAction(val label: String, val icon: ImageVector, val tag: String) {
-    SAVE("Save", Icons.Default.Star, "save_preferred"),
-    RESTORE("Restore", Icons.Default.Refresh, "restore_preferred"),
-    CLEAR("Clear", Icons.Default.Delete, "clear_preferred"),
-    REPLACE("Replace", Icons.Default.Star, "replace_preferred"),
-}
-
-/** An action, or the "Active" label if [action] is null, taking [slots] of the three slots of the row. */
-private class PreferredSlot(val action: PreferredAction?, val slots: Int)
-
-/**
- * Only what's available, so no button is ever disabled: Save across the row while nothing is saved, the "Active"
- * label across two slots and Clear while the preferred codec is active, and otherwise Save, Restore and Clear.
- */
-private fun preferredSlots(device: DeviceData): List<PreferredSlot> {
-    val current = device.codecConfig
-    val preferred = device.preferredConfig
-    return when {
-        preferred == null -> if (current != null) listOf(PreferredSlot(PreferredAction.SAVE, 3)) else emptyList()
-        preferred == current -> listOf(PreferredSlot(null, 2), PreferredSlot(PreferredAction.CLEAR, 1))
-        // A codec unknown to this app can't be saved
-        current == null -> listOf(PreferredSlot(PreferredAction.RESTORE, 2), PreferredSlot(PreferredAction.CLEAR, 1))
-        else -> listOf(PreferredAction.SAVE, PreferredAction.RESTORE, PreferredAction.CLEAR).map { PreferredSlot(it, 1) }
-    }
-}
-
-/** The size of the icons in the preferred codec's row, 18 dp at the normal font size, growing with the labels. */
+/** The size of the icons in the preferred codec's buttons, 18 dp at the normal font size, growing with the labels. */
 @Composable
 private fun preferredIconSize(): Dp =
     with(LocalDensity.current) { (MaterialTheme.typography.labelLarge.fontSize * (18f / 14f)).toDp() }
 
-/** The icon and the label of an action, or just the icon, which is then as tall as the label would be. */
+/** The icon and the label of a button, at least 40 dp tall. */
 @Composable
-private fun PreferredContent(label: String, icon: ImageVector, showLabel: Boolean) {
-    val style = MaterialTheme.typography.labelLarge
+private fun PreferredContent(label: String, icon: ImageVector) {
     Row(
         Modifier.heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = if (showLabel) null else label, modifier = Modifier.size(preferredIconSize()))
-        if (showLabel) {
-            Spacer(Modifier.width(8.dp))
-            Text(label, style = style, maxLines = 1)
-        } else {
-            Text("", style = style)
-        }
+        Icon(icon, contentDescription = null, modifier = Modifier.size(preferredIconSize()))
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
     }
 }
 
-/** A tonal button: Save in the theme's color, Restore in green and Clear in red. Without its label it has a tooltip. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PreferredActionButton(action: PreferredAction, showLabel: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    val (container, content) = when (action) {
-        PreferredAction.SAVE, PreferredAction.REPLACE -> scheme.primaryContainer to scheme.onPrimaryContainer
-        PreferredAction.RESTORE -> AppColors.status.restoreContainer to AppColors.status.onRestoreContainer
-        PreferredAction.CLEAR -> scheme.errorContainer to scheme.onErrorContainer
-    }
-    val button = @Composable {
-        Surface(
-            onClick = onClick,
-            shape = CircleShape,
-            color = container,
-            contentColor = content,
-            modifier = modifier.semantics { role = Role.Button }.testTag(action.tag)
-        ) {
-            PreferredContent(action.label, action.icon, showLabel)
-        }
-    }
-    if (showLabel) {
-        button()
-    } else {
-        TooltipBox(
-            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-            tooltip = { PlainTooltip { Text(action.label) } },
-            state = rememberTooltipState()
-        ) {
-            button()
-        }
-    }
+/** What the preferred codec's banner offers: Restore while it differs from the codec, Delete while it's active. */
+private enum class BannerAction(val label: String, val icon: ImageVector, val tag: String) {
+    RESTORE("Restore", Icons.Default.Refresh, "restore_preferred"),
+    DELETE("Delete", Icons.Default.Delete, "clear_preferred"),
 }
 
 /**
- * Says that the preferred codec is active, shaped like the collapsed card's chip but in the pale green, so it stays a
- * label among the buttons and doesn't invite a tap.
+ * Tops the expanded card with the preferred codec as text: in the collapsed card's Preferred chip green with Delete
+ * while it's active, otherwise a step darker than the card, with Restore while it differs, or what Save below the
+ * codec does while nothing is saved. A codec this app doesn't know can't be saved, so the card leaves the banner out
+ * when there's no preferred one either. The button is outlined and uncolored, so it doesn't compete with the chips or Save. It sits at the end
+ * of the title if both fit on the line, otherwise below the codec, so the title never wraps mid-word.
  */
 @Composable
-private fun PreferredActiveLabel(showLabel: Boolean, modifier: Modifier) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = AppColors.status.successContainer,
-        contentColor = AppColors.status.onSuccessContainer,
-        modifier = modifier.testTag("preferred_active")
-    ) {
-        PreferredContent("Active", Icons.Default.Check, showLabel)
-    }
-}
-
-/**
- * The expanded card's preferred codec section, a row of three equal slots, at most 420 dp wide. When the labels of
- * three buttons don't fit in a third of the row, on small phones or with large fonts, the one-slot buttons only show
- * their icons; Save and "Active", which are wider, keep their labels if those fit. The row never wraps, so the card
- * keeps its height whatever is available.
- */
-@Composable
-private fun PreferredCodecActions(device: DeviceData, actions: MainScreenActions) {
-    val slots = preferredSlots(device)
-    if (slots.isEmpty())
-        return
-    Column {
-        Spacer(Modifier.height(16.dp))
-        Text("Preferred Codec", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.height(8.dp))
-        BoxWithConstraints(Modifier.widthIn(max = 420.dp).fillMaxWidth().testTag("preferred_actions")) {
-            val gap = 8.dp
-            val third = (maxWidth - gap * 2) / 3
-            val measurer = rememberTextMeasurer()
-            val style = MaterialTheme.typography.labelLarge
-            val density = LocalDensity.current
-            // The icon, its gap and the padding on both sides
-            val around = preferredIconSize() + 8.dp + 32.dp
-            fun fits(label: String, width: Dp) =
-                with(density) { measurer.measure(label, style, softWrap = false).size.width.toDp() } + around <= width
-            // Decided for all three, so a button doesn't lose its label when another one appears
-            val thirdsFit = listOf(PreferredAction.SAVE, PreferredAction.RESTORE, PreferredAction.CLEAR).all { fits(it.label, third) }
-            Row(horizontalArrangement = Arrangement.spacedBy(gap), verticalAlignment = Alignment.CenterVertically) {
-                for (slot in slots) {
-                    val width = third * slot.slots + gap * (slot.slots - 1)
-                    val action = slot.action
-                    val showLabel = thirdsFit || (slot.slots > 1 && fits(action?.label ?: "Active", width))
-                    val modifier = Modifier.width(width)
-                    if (action == null) {
-                        PreferredActiveLabel(showLabel, modifier)
-                    } else {
-                        PreferredActionButton(action, showLabel, modifier) {
-                            when (action) {
-                                PreferredAction.SAVE, PreferredAction.REPLACE -> device.codecConfig?.let { actions.savePreferred(device.address, it) }
-                                PreferredAction.RESTORE -> device.preferredConfig?.let { actions.restorePreferred(device.address, it) }
-                                PreferredAction.CLEAR -> actions.deletePreferred(device.address)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Where the prototyped preferred codec banner sits in the expanded card. */
-internal enum class BannerPosition { TOP, BOTTOM }
-
-/** How the prototyped banner shows the preferred codec. */
-internal enum class BannerContent { TEXT, CHIPS }
-
-/** A prototype of the preferred codec as a banner, instead of today's row of buttons. */
-/** Where Save is in the prototypes that take it out of the banner: below the codec when it's useful, or always. */
-internal enum class SaveButton { WHEN_USEFUL, ALWAYS }
-
-/**
- * A prototype of the preferred codec as a banner, instead of today's row of buttons. With [save], Save is below the
- * codec and the banner only restores or deletes, with an outlined button.
- */
-internal data class PreferredBannerStyle(
-    val position: BannerPosition,
-    val content: BannerContent,
-    val twoActions: Boolean,
-    val save: SaveButton? = null,
-    val outlined: Boolean = save != null,
-    val active: ActiveColor = ActiveColor.PALE_GREEN,
-)
-
-/** The prototyped banner's color while the preferred codec is active. */
-internal enum class ActiveColor { PALE_GREEN, GRAY, GREEN }
-
-/** The prototype the expanded cards show, or null for today's design. */
-internal val LocalPreferredBannerStyle = staticCompositionLocalOf<PreferredBannerStyle?> { null }
-
-/** The collapsed card's chip labels for [config]: the codec, its sample rate and sample size, and LDAC's bitrate. */
-private fun configChipLabels(config: CodecConfig): List<String> {
-    val labels = ArrayList<String>()
-    CodecConfig.getCodecName(config.getCodecType())?.let { labels.add(it) }
-    CodecConfig.getSampleRate(config.sampleRate)?.let { labels.add("$it Hz") }
-    CodecConfig.getBitsPerSample(config.bitsPerSample)?.let { labels.add("$it bits/sample") }
-    if (config is LDACCodecConfig) {
-        if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE || config.bitrate == LDACCodecConfig.BITRATE_SYSTEM_DEFAULT) {
-            labels.add("Adaptive")
-        } else {
-            LDACCodecConfig.getFixedBitrate(config.bitrate, config.sampleRate)?.let { labels.add("$it kbps") }
-        }
-    }
-    return labels
-}
-
-/** The banner's actions, by state: Save while nothing is saved, Clear while it's active, otherwise Restore. */
-private fun bannerActions(device: DeviceData, style: PreferredBannerStyle): List<PreferredAction> {
-    val current = device.codecConfig
-    val preferred = device.preferredConfig
-    val twoActions = style.twoActions
-    if (style.save != null) {
-        return when {
-            preferred == null -> emptyList()
-            preferred == current -> listOf(PreferredAction.CLEAR)
-            else -> listOf(PreferredAction.RESTORE)
-        }
-    }
-    return when {
-        preferred == null -> if (current != null) listOf(PreferredAction.SAVE) else emptyList()
-        preferred == current -> listOf(PreferredAction.CLEAR)
-        // A codec unknown to this app can't replace the preferred one
-        twoActions && current != null -> listOf(PreferredAction.REPLACE, PreferredAction.RESTORE)
-        else -> listOf(PreferredAction.RESTORE)
-    }
-}
-
-/** Whether the banner shows: with an action, or without one while nothing is saved and Save is below the codec. */
-private fun bannerShown(device: DeviceData, style: PreferredBannerStyle) =
-    bannerActions(device, style).isNotEmpty() ||
-        (style.save != null && device.preferredConfig == null && device.codecConfig != null)
-
-/** The label of [action] in the banner, Clear is Delete when the banner has outlined buttons. */
-private fun bannerLabel(action: PreferredAction, style: PreferredBannerStyle) =
-    if (style.outlined && action == PreferredAction.CLEAR) "Delete" else action.label
-
-/** An uncolored outlined button, in the banner's content color. */
-@Composable
-private fun OutlinedBannerButton(label: String, action: PreferredAction, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        modifier = Modifier.semantics { role = Role.Button }.testTag(action.tag)
-    ) {
-        PreferredContent(label, action.icon, showLabel = true)
-    }
-}
-
-/**
- * Save below the codec, for the prototypes that take it out of the banner, as wide as the row up to 420 dp. While
- * the preferred codec is active it's either gone or, with [SaveButton.ALWAYS], "Saved as preferred" in the selected
- * chips' color, which can't be tapped. A codec this app doesn't know can't be saved.
- */
-@Composable
-private fun SeparateSave(device: DeviceData, mode: SaveButton, actions: MainScreenActions) {
-    val current = device.codecConfig
-    val saved = current != null && current == device.preferredConfig
-    val canSave = current != null && !saved
-    if (mode == SaveButton.WHEN_USEFUL && !canSave)
-        return
-    val scheme = MaterialTheme.colorScheme
-    val modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
-    Column {
-        Spacer(Modifier.height(16.dp))
-        if (saved) {
-            Surface(shape = CircleShape, color = scheme.inversePrimary, contentColor = scheme.onPrimaryContainer,
-                modifier = modifier.testTag("saved_preferred")) {
-                PreferredContent("Saved as preferred", Icons.Default.Check, showLabel = true)
-            }
-        } else {
-            Surface(
-                onClick = { current?.let { actions.savePreferred(device.address, it) } },
-                enabled = canSave,
-                shape = CircleShape,
-                color = scheme.primaryContainer,
-                contentColor = scheme.onPrimaryContainer,
-                modifier = modifier.graphicsLayer(alpha = if (canSave) 1f else 0.38f)
-                    .semantics { role = Role.Button }.testTag("save_preferred")
-            ) {
-                PreferredContent("Save as preferred", Icons.Default.Star, showLabel = true)
-            }
-        }
-    }
-}
-
-/**
- * The preferred codec as a banner: an icon, a title and the codec as text or chips, with its action at the end of the
- * title, or both actions below the codec. Pale green while the preferred codec is active, otherwise a step darker than
- * the card.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, actions: MainScreenActions) {
-    if (!bannerShown(device, style))
-        return
-    val bannerActions = bannerActions(device, style)
+private fun PreferredBanner(device: DeviceData, actions: MainScreenActions) {
     val preferred = device.preferredConfig
     val active = preferred != null && preferred == device.codecConfig
-    val scheme = MaterialTheme.colorScheme
-    val onClick = { action: PreferredAction ->
-        when (action) {
-            PreferredAction.SAVE, PreferredAction.REPLACE ->
-                device.codecConfig?.let { actions.savePreferred(device.address, it) }
-            PreferredAction.RESTORE -> preferred?.let { actions.restorePreferred(device.address, it) }
-            PreferredAction.CLEAR -> actions.deletePreferred(device.address)
-        }
-        Unit
+    val action = when {
+        preferred == null -> null
+        active -> BannerAction.DELETE
+        else -> BannerAction.RESTORE
     }
+    val scheme = MaterialTheme.colorScheme
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = when {
-            !active || style.active == ActiveColor.GRAY -> scheme.surfaceContainerHighest
-            style.active == ActiveColor.GREEN -> AppColors.status.restoreContainer
-            else -> AppColors.status.successContainer
-        },
-        contentColor = when {
-            !active || style.active == ActiveColor.GRAY -> scheme.onSurface
-            style.active == ActiveColor.GREEN -> AppColors.status.onRestoreContainer
-            else -> AppColors.status.onSuccessContainer
-        },
+        color = if (active) AppColors.status.preferredContainer else scheme.surfaceContainerHighest,
+        contentColor = if (active) AppColors.status.onPreferredContainer else scheme.onSurface,
         modifier = Modifier.fillMaxWidth().testTag("preferred_banner")
     ) {
         val iconSize = preferredIconSize()
@@ -982,15 +711,13 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
             else -> "Preferred codec"
         }
         BoxWithConstraints(Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)) {
-            // A lone action goes at the end of the title if both fit on the line, otherwise below the codec
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
             fun width(text: String, style: TextStyle) =
                 with(density) { measurer.measure(text, style, softWrap = false).size.width.toDp() }
-            val button = bannerActions.firstOrNull()?.let {
-                width(bannerLabel(it, style), MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp
-            } ?: 0.dp
-            val inline = bannerActions.size <= 1 &&
+            // The button's icon, its gap and the padding on both sides
+            val button = action?.let { width(it.label, MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp }
+            val inline = button == null ||
                 iconSize + 12.dp + width(title, MaterialTheme.typography.titleSmall) + 8.dp + button <= maxWidth
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 40.dp)) {
@@ -998,39 +725,20 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
                         modifier = Modifier.size(iconSize))
                     Spacer(Modifier.width(12.dp))
                     Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    if (inline && bannerActions.isNotEmpty()) {
+                    if (inline && action != null) {
                         Spacer(Modifier.width(8.dp))
-                        BannerButton(bannerActions[0], style) { onClick(bannerActions[0]) }
+                        BannerButton(device, action, actions)
                     }
                 }
-                Column(Modifier.padding(start = iconSize + 12.dp, end = 4.dp)) {
-                    if (preferred == null) {
-                        Text(
-                            if (style.save != null) "Save the codec below to switch to it whenever this device connects."
-                            else "Save the codec to switch to it whenever this device connects.",
-                            style = MaterialTheme.typography.bodyMedium)
-                    } else if (style.content == BannerContent.TEXT) {
-                        Text(preferred.describe(), style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        Spacer(Modifier.height(4.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            for (label in configChipLabels(preferred))
-                                ActiveConfigChip(label)
-                        }
-                    }
-                }
-                if (!inline) {
+                Text(
+                    preferred?.describe() ?: "Save the codec below to switch to it whenever this device connects.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(start = iconSize + 12.dp, end = 4.dp)
+                )
+                if (!inline && action != null) {
                     Spacer(Modifier.height(12.dp))
-                    FlowRow(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        for (action in bannerActions)
-                            BannerButton(action, style) { onClick(action) }
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        BannerButton(device, action, actions)
                     }
                 }
             }
@@ -1038,13 +746,49 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
     }
 }
 
-/** A banner's action: today's colored button, or an outlined one when Save is below the codec. */
+/** The banner's uncolored outlined button. */
 @Composable
-private fun BannerButton(action: PreferredAction, style: PreferredBannerStyle, onClick: () -> Unit) {
-    if (style.outlined)
-        OutlinedBannerButton(bannerLabel(action, style), action, onClick)
-    else
-        PreferredActionButton(action, showLabel = true, Modifier, onClick)
+private fun BannerButton(device: DeviceData, action: BannerAction, actions: MainScreenActions) {
+    Surface(
+        onClick = {
+            when (action) {
+                BannerAction.RESTORE -> device.preferredConfig?.let { actions.restorePreferred(device.address, it) }
+                BannerAction.DELETE -> actions.deletePreferred(device.address)
+            }
+        },
+        shape = CircleShape,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.semantics { role = Role.Button }.testTag(action.tag)
+    ) {
+        PreferredContent(action.label, action.icon)
+    }
+}
+
+/**
+ * Ends the expanded card when there's something to save: nothing is saved yet, or the codec differs from the
+ * preferred one, which it then replaces. A tonal button as wide as the row, up to 420 dp. Never for a codec this app
+ * doesn't know.
+ */
+@Composable
+private fun SavePreferredButton(device: DeviceData, actions: MainScreenActions) {
+    val current = device.codecConfig
+    if (current == null || current == device.preferredConfig)
+        return
+    val scheme = MaterialTheme.colorScheme
+    Column {
+        Spacer(Modifier.height(16.dp))
+        Surface(
+            onClick = { actions.savePreferred(device.address, current) },
+            shape = CircleShape,
+            color = scheme.primaryContainer,
+            contentColor = scheme.onPrimaryContainer,
+            modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth().semantics { role = Role.Button }
+                .testTag("save_preferred")
+        ) {
+            PreferredContent("Save as preferred", Icons.Default.Star)
+        }
+    }
 }
 
 private data class ConfigRowItem(
@@ -1325,28 +1069,19 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
             }
             AnimatedVisibility(extended) {
                 Column {
-                    val bannerStyle = LocalPreferredBannerStyle.current
                     if (device.associationRequired) {
                         LinkBanner(device, state.canAssociate)
                         Spacer(Modifier.height(16.dp))
                     }
-                    if (bannerStyle?.position == BannerPosition.TOP && bannerShown(device, bannerStyle)) {
-                        PreferredBanner(device, bannerStyle, actions)
+                    if (device.preferredConfig != null || device.codecConfig != null) {
+                        PreferredBanner(device, actions)
                         Spacer(Modifier.height(16.dp))
                     }
                     CodecConfigSelection(
                         device,
                         onConfigChange = { actions.setCodec(device.address, it) }
                     )
-                    when (bannerStyle?.position) {
-                        null -> PreferredCodecActions(device, actions)
-                        BannerPosition.BOTTOM -> if (bannerShown(device, bannerStyle)) {
-                            Spacer(Modifier.height(16.dp))
-                            PreferredBanner(device, bannerStyle, actions)
-                        }
-                        BannerPosition.TOP -> {}
-                    }
-                    bannerStyle?.save?.let { SeparateSave(device, it, actions) }
+                    SavePreferredButton(device, actions)
                 }
             }
         }
@@ -1429,9 +1164,9 @@ private fun LinkChip(linking: Boolean, canLink: Boolean) {
 }
 
 /**
- * The card of a device whose codec can only be read once it's linked: why, and "Link Device" where the lone Save
- * button would be, as wide as the row up to 420 dp. While linking it spins instead, while another device links it
- * waits. Without the companion feature there's only the text.
+ * The card of a device whose codec can only be read once it's linked: why, and "Link Device" where Save would be,
+ * as wide as the row up to 420 dp. While linking it spins instead, while another device links it waits. Without the
+ * companion feature there's only the text.
  */
 @Composable
 private fun LinkPrompt(device: DeviceData, state: MainScreenState, actions: MainScreenActions) {
@@ -1470,7 +1205,7 @@ private fun LinkPrompt(device: DeviceData, state: MainScreenState, actions: Main
                     Text("Linking…", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                 }
             } else {
-                PreferredContent("Link Device", ImageVector.vectorResource(R.drawable.ic_link), showLabel = true)
+                PreferredContent("Link Device", ImageVector.vectorResource(R.drawable.ic_link))
             }
         }
     }

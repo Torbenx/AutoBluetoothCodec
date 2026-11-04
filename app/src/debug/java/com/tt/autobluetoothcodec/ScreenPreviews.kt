@@ -137,9 +137,9 @@ internal val mainScreenStates = listOf(
     mainScene("Expanded, preferred codec differs",
         state(device(ldac(CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_24), preferred = ldac()), sony(preferred = aac())),
         setOf(ADDRESS)),
-    // Only restoring and clearing, a codec this app doesn't know can't be saved
     mainScene("Expanded, codec readable, not linked",
         state(device(associationRequired = true, associated = false)), setOf(ADDRESS)),
+    // Only restoring, a codec this app doesn't know can't be saved
     mainScene("Expanded, unsupported codec, preferred saved", state(
         device(codec = null, android = AndroidCodecConfig(CODEC_TYPE_LC3, CodecConfig.SAMPLE_RATE_48000, CodecConfig.BITS_PER_SAMPLE_16),
             preferred = ldac()),

@@ -165,20 +165,22 @@ class MainScreenTest {
     private fun action(tag: String) = compose.onNodeWithTag(tag).performScrollTo()
 
     @Test
-    fun withNothingSavedOnlySaveIsOffered() {
+    fun withNothingSavedTheBannerPointsToSaveBelowTheCodec() {
         show(device())
         expand()
+        text("No preferred codec").assertExists()
         compose.onNodeWithTag("restore_preferred").assertDoesNotExist()
         compose.onNodeWithTag("clear_preferred").assertDoesNotExist()
         action("save_preferred").performClick()
-        assertEquals(listOf("savePreferred $ADDRESS LDAC, 96 kHz, 32-bit"), actions.calls)
+        assertEquals(listOf("savePreferred $ADDRESS ${ldac().describe()}"), actions.calls)
     }
 
     @Test
-    fun whileActiveThePreferredCodecCanOnlyBeCleared() {
+    fun whileActiveThePreferredCodecCanOnlyBeDeleted() {
         show(device(preferred = ldac()))
         expand()
-        compose.onNodeWithTag("preferred_active", useUnmergedTree = true).assertExists()
+        text("Preferred codec is active").assertExists()
+        text(ldac().describe()).assertExists()
         compose.onNodeWithTag("save_preferred").assertDoesNotExist()
         compose.onNodeWithTag("restore_preferred").assertDoesNotExist()
         action("clear_preferred").performClick()
@@ -186,18 +188,18 @@ class MainScreenTest {
     }
 
     @Test
-    fun aDifferentPreferredCodecCanBeReplacedRestoredAndCleared() {
+    fun aDifferentPreferredCodecCanBeRestoredOrReplacedBySaving() {
         val preferred = codec(CodecConfig.CODEC_TYPE_AAC, CodecConfig.SAMPLE_RATE_44100, CodecConfig.BITS_PER_SAMPLE_16)
         show(device(preferred = preferred))
         expand()
-        compose.onNodeWithTag("preferred_active").assertDoesNotExist()
-        action("save_preferred").performClick()
+        text("Preferred codec").assertExists()
+        text(preferred.describe()).assertExists()
+        compose.onNodeWithTag("clear_preferred").assertDoesNotExist()
         action("restore_preferred").performClick()
-        action("clear_preferred").performClick()
+        action("save_preferred").performClick()
         assertEquals(listOf(
-            "savePreferred $ADDRESS LDAC, 96 kHz, 32-bit",
-            "restorePreferred $ADDRESS AAC, 44.1 kHz, 16-bit",
-            "deletePreferred $ADDRESS",
+            "restorePreferred $ADDRESS ${preferred.describe()}",
+            "savePreferred $ADDRESS ${ldac().describe()}",
         ), actions.calls)
     }
 
@@ -206,16 +208,17 @@ class MainScreenTest {
         show(device(codec = null, android = AndroidCodecConfig(7), preferred = ldac()))
         expand()
         compose.onNodeWithTag("save_preferred").assertDoesNotExist()
+        compose.onNodeWithTag("clear_preferred").assertDoesNotExist()
         action("restore_preferred").performClick()
-        action("clear_preferred").assertExists()
-        assertEquals(listOf("restorePreferred $ADDRESS LDAC, 96 kHz, 32-bit"), actions.calls)
+        assertEquals(listOf("restorePreferred $ADDRESS ${ldac().describe()}"), actions.calls)
     }
 
     @Test
-    fun noPreferredCodecActionsForAnUnknownCodecWithoutOne() {
+    fun noBannerOrSaveForAnUnknownCodecWithoutAPreferredOne() {
         show(device(codec = null, android = AndroidCodecConfig(7)))
         expand()
-        compose.onNodeWithTag("preferred_actions").assertDoesNotExist()
+        compose.onNodeWithTag("preferred_banner").assertDoesNotExist()
+        compose.onNodeWithTag("save_preferred").assertDoesNotExist()
     }
 
     @Test
