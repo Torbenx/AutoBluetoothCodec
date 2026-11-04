@@ -55,8 +55,15 @@ internal class BannerPrototypes(private val shot: Shot) {
                     for (two in listOf(false, true))
                         variants.add("${position.name.lowercase()}-${content.name.lowercase()}-${if (two) 2 else 1}" to
                             PreferredBannerStyle(position, content, two))
+            for (position in BannerPosition.entries)
+                for (content in BannerContent.entries)
+                    for (save in SaveButton.entries)
+                        variants.add("${position.name.lowercase()}-${content.name.lowercase()}-" +
+                            (if (save == SaveButton.ALWAYS) "saved" else "save") to
+                            PreferredBannerStyle(position, content, false, save))
             val shots = ArrayList<Shot>()
-            for ((variant, style) in variants) {
+            val only = System.getenv("BANNER_VARIANTS")?.split(",")
+            for ((variant, style) in variants.filter { only == null || it.first.substringAfterLast("-") in only }) {
                 for ((name, data) in STATES)
                     shots.add(Shot(variant, style, name, data, "Phone", PHONE, 1f))
                 for ((config, names) in EDGES)

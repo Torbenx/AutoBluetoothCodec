@@ -819,7 +819,19 @@ internal enum class BannerPosition { TOP, BOTTOM }
 internal enum class BannerContent { TEXT, CHIPS }
 
 /** A prototype of the preferred codec as a banner, instead of today's row of buttons. */
-internal data class PreferredBannerStyle(val position: BannerPosition, val content: BannerContent, val twoActions: Boolean)
+/** Where Save is in the prototypes that take it out of the banner: below the codec when it's useful, or always. */
+internal enum class SaveButton { WHEN_USEFUL, ALWAYS }
+
+/**
+ * A prototype of the preferred codec as a banner, instead of today's row of buttons. With [save], Save is below the
+ * codec and the banner only restores or deletes, with an outlined button.
+ */
+internal data class PreferredBannerStyle(
+    val position: BannerPosition,
+    val content: BannerContent,
+    val twoActions: Boolean,
+    val save: SaveButton? = null,
+)
 
 /** The prototype the expanded cards show, or null for today's design. */
 internal val LocalPreferredBannerStyle = staticCompositionLocalOf<PreferredBannerStyle?> { null }
@@ -841,15 +853,83 @@ private fun configChipLabels(config: CodecConfig): List<String> {
 }
 
 /** The banner's actions, by state: Save while nothing is saved, Clear while it's active, otherwise Restore. */
-private fun bannerActions(device: DeviceData, twoActions: Boolean): List<PreferredAction> {
+private fun bannerActions(device: DeviceData, style: PreferredBannerStyle): List<PreferredAction> {
     val current = device.codecConfig
     val preferred = device.preferredConfig
+    val twoActions = style.twoActions
+    if (style.save != null) {
+        return when {
+            preferred == null -> emptyList()
+            preferred == current -> listOf(PreferredAction.CLEAR)
+            else -> listOf(PreferredAction.RESTORE)
+        }
+    }
     return when {
         preferred == null -> if (current != null) listOf(PreferredAction.SAVE) else emptyList()
         preferred == current -> listOf(PreferredAction.CLEAR)
         // A codec unknown to this app can't replace the preferred one
         twoActions && current != null -> listOf(PreferredAction.REPLACE, PreferredAction.RESTORE)
         else -> listOf(PreferredAction.RESTORE)
+    }
+}
+
+/** Whether the banner shows: with an action, or without one while nothing is saved and Save is below the codec. */
+private fun bannerShown(device: DeviceData, style: PreferredBannerStyle) =
+    bannerActions(device, style).isNotEmpty() ||
+        (style.save != null && device.preferredConfig == null && device.codecConfig != null)
+
+/** The label of [action] in the banner, Clear is Delete when the banner has outlined buttons. */
+private fun bannerLabel(action: PreferredAction, style: PreferredBannerStyle) =
+    if (style.save != null && action == PreferredAction.CLEAR) "Delete" else action.label
+
+/** An uncolored outlined button, in the banner's content color. */
+@Composable
+private fun OutlinedBannerButton(label: String, action: PreferredAction, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = CircleShape,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+        modifier = Modifier.semantics { role = Role.Button }.testTag(action.tag)
+    ) {
+        PreferredContent(label, action.icon, showLabel = true)
+    }
+}
+
+/**
+ * Save below the codec, for the prototypes that take it out of the banner, as wide as the row up to 420 dp. While
+ * the preferred codec is active it's either gone or, with [SaveButton.ALWAYS], "Saved as preferred" in the selected
+ * chips' color, which can't be tapped. A codec this app doesn't know can't be saved.
+ */
+@Composable
+private fun SeparateSave(device: DeviceData, mode: SaveButton, actions: MainScreenActions) {
+    val current = device.codecConfig
+    val saved = current != null && current == device.preferredConfig
+    val canSave = current != null && !saved
+    if (mode == SaveButton.WHEN_USEFUL && !canSave)
+        return
+    val scheme = MaterialTheme.colorScheme
+    val modifier = Modifier.widthIn(max = 420.dp).fillMaxWidth()
+    Column {
+        Spacer(Modifier.height(16.dp))
+        if (saved) {
+            Surface(shape = CircleShape, color = scheme.inversePrimary, contentColor = scheme.onPrimaryContainer,
+                modifier = modifier.testTag("saved_preferred")) {
+                PreferredContent("Saved as preferred", Icons.Default.Check, showLabel = true)
+            }
+        } else {
+            Surface(
+                onClick = { current?.let { actions.savePreferred(device.address, it) } },
+                enabled = canSave,
+                shape = CircleShape,
+                color = scheme.primaryContainer,
+                contentColor = scheme.onPrimaryContainer,
+                modifier = modifier.graphicsLayer(alpha = if (canSave) 1f else 0.38f)
+                    .semantics { role = Role.Button }.testTag("save_preferred")
+            ) {
+                PreferredContent("Save as preferred", Icons.Default.Star, showLabel = true)
+            }
+        }
     }
 }
 
@@ -861,9 +941,9 @@ private fun bannerActions(device: DeviceData, twoActions: Boolean): List<Preferr
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, actions: MainScreenActions) {
-    val bannerActions = bannerActions(device, style.twoActions)
-    if (bannerActions.isEmpty())
+    if (!bannerShown(device, style))
         return
+    val bannerActions = bannerActions(device, style)
     val preferred = device.preferredConfig
     val active = preferred != null && preferred == device.codecConfig
     val scheme = MaterialTheme.colorScheme
@@ -894,8 +974,10 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
             val density = LocalDensity.current
             fun width(text: String, style: TextStyle) =
                 with(density) { measurer.measure(text, style, softWrap = false).size.width.toDp() }
-            val button = width(bannerActions[0].label, MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp
-            val inline = bannerActions.size == 1 &&
+            val button = bannerActions.firstOrNull()?.let {
+                width(bannerLabel(it, style), MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp
+            } ?: 0.dp
+            val inline = bannerActions.size <= 1 &&
                 iconSize + 12.dp + width(title, MaterialTheme.typography.titleSmall) + 8.dp + button <= maxWidth
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 40.dp)) {
@@ -903,14 +985,16 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
                         modifier = Modifier.size(iconSize))
                     Spacer(Modifier.width(12.dp))
                     Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    if (inline) {
+                    if (inline && bannerActions.isNotEmpty()) {
                         Spacer(Modifier.width(8.dp))
-                        PreferredActionButton(bannerActions[0], showLabel = true, Modifier) { onClick(bannerActions[0]) }
+                        BannerButton(bannerActions[0], style) { onClick(bannerActions[0]) }
                     }
                 }
                 Column(Modifier.padding(start = iconSize + 12.dp, end = 4.dp)) {
                     if (preferred == null) {
-                        Text("Save the codec to switch to it whenever this device connects.",
+                        Text(
+                            if (style.save != null) "Save the codec below to switch to it whenever this device connects."
+                            else "Save the codec to switch to it whenever this device connects.",
                             style = MaterialTheme.typography.bodyMedium)
                     } else if (style.content == BannerContent.TEXT) {
                         Text(preferred.describe(), style = MaterialTheme.typography.bodyMedium)
@@ -933,12 +1017,21 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         for (action in bannerActions)
-                            PreferredActionButton(action, showLabel = true, Modifier) { onClick(action) }
+                            BannerButton(action, style) { onClick(action) }
                     }
                 }
             }
         }
     }
+}
+
+/** A banner's action: today's colored button, or an outlined one when Save is below the codec. */
+@Composable
+private fun BannerButton(action: PreferredAction, style: PreferredBannerStyle, onClick: () -> Unit) {
+    if (style.save != null)
+        OutlinedBannerButton(bannerLabel(action, style), action, onClick)
+    else
+        PreferredActionButton(action, showLabel = true, Modifier, onClick)
 }
 
 private data class ConfigRowItem(
@@ -1224,7 +1317,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                         LinkBanner(device, state.canAssociate)
                         Spacer(Modifier.height(16.dp))
                     }
-                    if (bannerStyle?.position == BannerPosition.TOP && bannerActions(device, bannerStyle.twoActions).isNotEmpty()) {
+                    if (bannerStyle?.position == BannerPosition.TOP && bannerShown(device, bannerStyle)) {
                         PreferredBanner(device, bannerStyle, actions)
                         Spacer(Modifier.height(16.dp))
                     }
@@ -1234,12 +1327,13 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                     )
                     when (bannerStyle?.position) {
                         null -> PreferredCodecActions(device, actions)
-                        BannerPosition.BOTTOM -> if (bannerActions(device, bannerStyle.twoActions).isNotEmpty()) {
+                        BannerPosition.BOTTOM -> if (bannerShown(device, bannerStyle)) {
                             Spacer(Modifier.height(16.dp))
                             PreferredBanner(device, bannerStyle, actions)
                         }
                         BannerPosition.TOP -> {}
                     }
+                    bannerStyle?.save?.let { SeparateSave(device, it, actions) }
                 }
             }
         }
