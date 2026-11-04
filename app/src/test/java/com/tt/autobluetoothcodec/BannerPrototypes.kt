@@ -62,8 +62,16 @@ internal class BannerPrototypes(private val shot: Shot) {
                             (if (save == SaveButton.ALWAYS) "saved" else "save") to
                             PreferredBannerStyle(position, content, false, save))
             val shots = ArrayList<Shot>()
+            // Round 3: on top, as text, with outlined buttons, the active banner gray or green
+            for (active in listOf(ActiveColor.GRAY, ActiveColor.GREEN))
+                for ((save, two) in listOf(null to false, null to true, SaveButton.WHEN_USEFUL to false, SaveButton.ALWAYS to false))
+                    variants.add("r3-${active.name.lowercase()}-" + when (save) {
+                        null -> if (two) "2" else "1"
+                        SaveButton.WHEN_USEFUL -> "save"
+                        SaveButton.ALWAYS -> "saved"
+                    } to PreferredBannerStyle(BannerPosition.TOP, BannerContent.TEXT, two, save, outlined = true, active = active))
             val only = System.getenv("BANNER_VARIANTS")?.split(",")
-            for ((variant, style) in variants.filter { only == null || it.first.substringAfterLast("-") in only }) {
+            for ((variant, style) in variants.filter { only == null || only.any { o -> it.first.startsWith(o) } }) {
                 for ((name, data) in STATES)
                     shots.add(Shot(variant, style, name, data, "Phone", PHONE, 1f))
                 for ((config, names) in EDGES)

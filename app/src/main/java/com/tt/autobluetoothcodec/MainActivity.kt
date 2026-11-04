@@ -831,7 +831,12 @@ internal data class PreferredBannerStyle(
     val content: BannerContent,
     val twoActions: Boolean,
     val save: SaveButton? = null,
+    val outlined: Boolean = save != null,
+    val active: ActiveColor = ActiveColor.PALE_GREEN,
 )
+
+/** The prototyped banner's color while the preferred codec is active. */
+internal enum class ActiveColor { PALE_GREEN, GRAY, GREEN }
 
 /** The prototype the expanded cards show, or null for today's design. */
 internal val LocalPreferredBannerStyle = staticCompositionLocalOf<PreferredBannerStyle?> { null }
@@ -880,7 +885,7 @@ private fun bannerShown(device: DeviceData, style: PreferredBannerStyle) =
 
 /** The label of [action] in the banner, Clear is Delete when the banner has outlined buttons. */
 private fun bannerLabel(action: PreferredAction, style: PreferredBannerStyle) =
-    if (style.save != null && action == PreferredAction.CLEAR) "Delete" else action.label
+    if (style.outlined && action == PreferredAction.CLEAR) "Delete" else action.label
 
 /** An uncolored outlined button, in the banner's content color. */
 @Composable
@@ -902,7 +907,7 @@ private fun OutlinedBannerButton(label: String, action: PreferredAction, onClick
  * chips' color, which can't be tapped. A codec this app doesn't know can't be saved.
  */
 @Composable
-private fun SeparateSave(device: DeviceData, mode: SaveButton, actions: MainScreenActions) {
+private fun SeparateSave(device: DeviceData, mode: SaveButton, outlined: Boolean, actions: MainScreenActions) {
     val current = device.codecConfig
     val saved = current != null && current == device.preferredConfig
     val canSave = current != null && !saved
@@ -922,8 +927,9 @@ private fun SeparateSave(device: DeviceData, mode: SaveButton, actions: MainScre
                 onClick = { current?.let { actions.savePreferred(device.address, it) } },
                 enabled = canSave,
                 shape = CircleShape,
-                color = scheme.primaryContainer,
-                contentColor = scheme.onPrimaryContainer,
+                color = if (outlined) Color.Transparent else scheme.primaryContainer,
+                contentColor = if (outlined) scheme.onSurface else scheme.onPrimaryContainer,
+                border = if (outlined) BorderStroke(1.dp, scheme.outline) else null,
                 modifier = modifier.graphicsLayer(alpha = if (canSave) 1f else 0.38f)
                     .semantics { role = Role.Button }.testTag("save_preferred")
             ) {
@@ -958,8 +964,16 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
     }
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = if (active) AppColors.status.successContainer else scheme.surfaceContainerHighest,
-        contentColor = if (active) AppColors.status.onSuccessContainer else scheme.onSurface,
+        color = when {
+            !active || style.active == ActiveColor.GRAY -> scheme.surfaceContainerHighest
+            style.active == ActiveColor.GREEN -> AppColors.status.restoreContainer
+            else -> AppColors.status.successContainer
+        },
+        contentColor = when {
+            !active || style.active == ActiveColor.GRAY -> scheme.onSurface
+            style.active == ActiveColor.GREEN -> AppColors.status.onRestoreContainer
+            else -> AppColors.status.onSuccessContainer
+        },
         modifier = Modifier.fillMaxWidth().testTag("preferred_banner")
     ) {
         val iconSize = preferredIconSize()
@@ -1028,7 +1042,7 @@ private fun PreferredBanner(device: DeviceData, style: PreferredBannerStyle, act
 /** A banner's action: today's colored button, or an outlined one when Save is below the codec. */
 @Composable
 private fun BannerButton(action: PreferredAction, style: PreferredBannerStyle, onClick: () -> Unit) {
-    if (style.save != null)
+    if (style.outlined)
         OutlinedBannerButton(bannerLabel(action, style), action, onClick)
     else
         PreferredActionButton(action, showLabel = true, Modifier, onClick)
@@ -1333,7 +1347,7 @@ private fun DeviceCard(device: DeviceData, initialExtended: Boolean, state: Main
                         }
                         BannerPosition.TOP -> {}
                     }
-                    bannerStyle?.save?.let { SeparateSave(device, it, actions) }
+                    bannerStyle?.save?.let { SeparateSave(device, it, bannerStyle.outlined, actions) }
                 }
             }
         }
