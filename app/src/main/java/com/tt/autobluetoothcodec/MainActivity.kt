@@ -685,8 +685,9 @@ private enum class BannerAction(val label: String, val icon: ImageVector, val ta
  * Tops the expanded card with the preferred codec as text: in the collapsed card's Preferred chip green with Delete
  * while it's active, otherwise a step darker than the card, with Restore while it differs, or what Save below the
  * codec does while nothing is saved. A codec this app doesn't know can't be saved, so the card leaves the banner out
- * when there's no preferred one either. The button is outlined and uncolored, so it doesn't compete with the chips or Save. It sits at the end
- * of the title if both fit on the line, otherwise below the codec, so the title never wraps mid-word.
+ * when there's no preferred one either. The button is outlined and uncolored, so it doesn't compete with the chips or Save. It sits beside the
+ * title and the codec, centered on both, if the title fits next to it, where a long codec wraps instead of moving the
+ * button. Otherwise it's below the codec, so the title never wraps mid-word.
  */
 @Composable
 private fun PreferredBanner(device: DeviceData, actions: MainScreenActions) {
@@ -710,39 +711,52 @@ private fun PreferredBanner(device: DeviceData, actions: MainScreenActions) {
             active -> "Preferred codec is active"
             else -> "Preferred codec"
         }
-        BoxWithConstraints(Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)) {
+        val icon = if (active) Icons.Default.Check else Icons.Default.Star
+        val description = preferred?.describe() ?: "Save the codec below to switch to it whenever this device connects."
+        // With the button's 48 dp touch target around its 40 dp, this puts both the button and the text, with its own
+        // 4 dp, 12 dp from the banner's edge
+        BoxWithConstraints(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
             fun width(text: String, style: TextStyle) =
                 with(density) { measurer.measure(text, style, softWrap = false).size.width.toDp() }
             // The button's icon, its gap and the padding on both sides
             val button = action?.let { width(it.label, MaterialTheme.typography.labelLarge) + iconSize + 8.dp + 32.dp }
-            val inline = button == null ||
+            val beside = button != null &&
                 iconSize + 12.dp + width(title, MaterialTheme.typography.titleSmall) + 8.dp + button <= maxWidth
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 40.dp)) {
-                    Icon(if (active) Icons.Default.Check else Icons.Default.Star, contentDescription = null,
-                        modifier = Modifier.size(iconSize))
-                    Spacer(Modifier.width(12.dp))
-                    Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    if (inline && action != null) {
-                        Spacer(Modifier.width(8.dp))
-                        BannerButton(device, action, actions)
-                    }
+            if (beside) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PreferredBannerText(icon, title, description, Modifier.weight(1f))
+                    Spacer(Modifier.width(8.dp))
+                    BannerButton(device, action, actions)
                 }
-                Text(
-                    preferred?.describe() ?: "Save the codec below to switch to it whenever this device connects.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(start = iconSize + 12.dp, end = 4.dp)
-                )
-                if (!inline && action != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        BannerButton(device, action, actions)
+            } else {
+                Column {
+                    PreferredBannerText(icon, title, description)
+                    if (action != null) {
+                        Spacer(Modifier.height(4.dp))
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                            BannerButton(device, action, actions)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/** The banner's icon and title, with its codec or explanation below the title. */
+@Composable
+private fun PreferredBannerText(icon: ImageVector, title: String, description: String, modifier: Modifier = Modifier) {
+    val iconSize = preferredIconSize()
+    Column(modifier.padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(iconSize))
+            Spacer(Modifier.width(12.dp))
+            Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(2.dp))
+        Text(description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = iconSize + 12.dp))
     }
 }
 
