@@ -8,6 +8,8 @@ internal object UiTestData {
 
         override fun requestPermission() { calls.add("requestPermission") }
         override fun openAppSettings() { calls.add("openAppSettings") }
+        override fun enableBluetooth() { calls.add("enableBluetooth") }
+        override fun openBluetoothSettings() { calls.add("openBluetoothSettings") }
         override fun openLog() { calls.add("openLog") }
         override fun openAbout() { calls.add("openAbout") }
         override fun setCodec(address: String, config: CodecConfig) { calls.add("setCodec $address ${config.describe()}") }

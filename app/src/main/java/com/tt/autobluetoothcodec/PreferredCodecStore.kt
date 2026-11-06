@@ -45,6 +45,9 @@ object PreferredCodecStore {
         preferences(context).edit { remove(key(device)) }
     }
 
+    /** Whether any device has a preferred codec. */
+    fun hasAny(context: Context): Boolean = preferences(context).all.isNotEmpty()
+
     /** Removes the preferred codecs of all devices, for tests. */
     @VisibleForTesting
     fun clearForTest(context: Context) {

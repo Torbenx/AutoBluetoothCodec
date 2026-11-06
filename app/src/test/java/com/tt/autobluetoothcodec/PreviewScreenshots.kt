@@ -78,6 +78,10 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 onNodeWithTag("list_toggle").performClick()
                 onNodeWithTag("list_saved").performClick()
             }),
+            emptyStates.first { it.name == "No devices" } to ("Nothing saved" to {
+                onNodeWithTag("list_toggle").performClick()
+                onNodeWithTag("list_saved").performClick()
+            }),
             // Only debug builds have the device menu, for unlinking
             mainScreenStates.first { it.name == "No codec info, long name, debug options" } to
                 ("Device menu" to { onAllNodesWithTag("device_menu")[0].performClick() }),
@@ -105,7 +109,8 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 for (device in CONFIGURATIONS)
                     shots.add(Shot("1 Screens", scene, device, if (scene === Screens.licenses) waitForLicenses else ({})))
             for (scene in mainScreenStates)
-                for (device in listOf(PHONE, PHONE_DARK))
+                // The empty states have their own layout, which has to fit everywhere
+                for (device in if (scene in emptyStates) CONFIGURATIONS else listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("2 Main states", scene, device))
             for (scene in logScreenStates)
                 for (device in listOf(PHONE, PHONE_DARK))
@@ -114,6 +119,8 @@ internal class PreviewScreenshots(private val shot: Shot) {
                 for (device in listOf(PHONE, PHONE_DARK))
                     shots.add(Shot("4 Interactions", Scene("${scene.name}, ${interaction.first}", scene.content), device,
                         interaction.second))
+            for (scene in sniffingFrames)
+                shots.add(Shot("5 Sniffing", scene, PHONE))
             return shots
         }
 

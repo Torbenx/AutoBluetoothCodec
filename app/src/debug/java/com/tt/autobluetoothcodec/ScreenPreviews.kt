@@ -1,7 +1,12 @@
 package com.tt.autobluetoothcodec
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Devices
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
@@ -48,6 +53,8 @@ internal class Scene(val name: String, val content: @Composable () -> Unit) {
 internal object NoMainActions : MainScreenActions {
     override fun requestPermission() {}
     override fun openAppSettings() {}
+    override fun enableBluetooth() {}
+    override fun openBluetoothSettings() {}
     override fun openLog() {}
     override fun openAbout() {}
     override fun setCodec(address: String, config: CodecConfig) {}
@@ -96,11 +103,29 @@ internal object Screens {
     val all = listOf(main, log, about, licenses)
 }
 
-/** The main screen's other states, edge cases included. */
-internal val mainScreenStates = listOf(
+/** The main screen with nothing to show. The Saved list's empty state needs a tap, see PreviewScreenshots. */
+internal val emptyStates = listOf(
+    mainScene("Bluetooth off", state(bluetoothEnabled = false)),
     mainScene("No devices", state()),
     mainScene("Permission denied", state(permissionState = PermissionState.DENIED)),
     mainScene("Permission permanently denied", state(permissionState = PermissionState.PERMANENTLY_DENIED)),
+)
+
+/** The sniffing dog walking left, sniffing, mid-turn and walking right. The states above only show its start. */
+internal val sniffingFrames = listOf(1.9f, 4.3f, 5.22f, 7.5f).map { seconds ->
+    Scene("Sniffing at $seconds s") {
+        AppTheme {
+            Surface(Modifier.fillMaxSize()) {
+                DogArt(DogScene.SNIFFING, Modifier.fillMaxWidth().aspectRatio(DOG_ART_RATIO), frozenAt = seconds)
+            }
+        }
+    }
+}
+
+/** The main screen's other states, edge cases included. */
+internal val mainScreenStates = emptyStates + listOf(
+    // For a moment after Bluetooth turned on
+    mainScene("Bluetooth profile connecting", state(devicesKnown = false)),
     // Since API 36 the codec status can only be read once the device is linked
     mainScene("Codec unreadable until linked",
         state(device(statusReadable = false, associationRequired = true, associated = false))),

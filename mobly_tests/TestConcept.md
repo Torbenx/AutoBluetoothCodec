@@ -300,6 +300,7 @@ the UI polish. The same tests run on the JVM and on every phone
 | V11 | Clear dialog (open operations stay), share dialog (the chosen mode is exported), disable logging dialog and enabling again; an opened log file is read only, shows nothing while loading and has its own empty text, and Open Log is only in debug builds | P2 |
 | V12 | Screenshots in light and dark, font scales, landscape, screen sizes; after the UI polish (D5) | P3 |
 | V13 | About screen: reached from the main screen's menu; the version, and the source code, license and third-party licenses items open their targets; the build collected the third-party licenses | P2 |
+| V14 | Empty states: Bluetooth off asks to turn it on, after the permission screens; no audio devices offers the Bluetooth settings, but not while the profile is still connecting; the Saved list with nothing saved leads back to the connected devices, and with something saved has no empty state | P2 |
 
 ### L3 Bluetooth logic tests
 

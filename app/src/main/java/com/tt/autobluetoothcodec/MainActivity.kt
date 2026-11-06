@@ -2,6 +2,7 @@ package com.tt.autobluetoothcodec
 
 import android.Manifest
 import android.bluetooth.BluetoothA2dp
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
@@ -9,6 +10,7 @@ import android.companion.AssociationInfo
 import android.companion.AssociationRequest
 import android.companion.BluetoothDeviceFilter
 import android.companion.CompanionDeviceManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -57,7 +60,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -95,7 +97,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -133,12 +134,18 @@ internal data class MainScreenState(
     // The device a link is being requested for, null if none
     val linkingAddress: String?,
     val showDevelopmentOptions: Boolean,
+    val bluetoothEnabled: Boolean,
+    // Whether empty devices mean none are connected, right after Bluetooth turned on the profile isn't connected yet
+    val devicesKnown: Boolean,
+    val hasSavedDevices: Boolean,
 )
 
 /** What the main screen's controls do, implemented by [MainActivity]. */
 internal interface MainScreenActions {
     fun requestPermission()
     fun openAppSettings()
+    fun enableBluetooth()
+    fun openBluetoothSettings()
     fun openLog()
     fun openAbout()
     fun setCodec(address: String, config: CodecConfig)
@@ -154,6 +161,9 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
         private const val TAG = "MainActivity"
         private const val COMPANION_TAG = "CompanionAssociation"
         private const val FIRST_DEVICES_SEEN = "first_devices_seen"
+
+        // How many polls with Bluetooth on the profile may take to connect before there just are no devices
+        private const val PROFILE_WAIT_POLLS = 3
 
         // Kept per process, so the activity being recreated doesn't log the same state again
         private var loggedPermissionState: PermissionState? = null
@@ -189,6 +199,8 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     private val actions = object : MainScreenActions {
         override fun requestPermission() = requestBluetoothPermission()
         override fun openAppSettings() = this@MainActivity.openAppSettings()
+        override fun enableBluetooth() = this@MainActivity.enableBluetooth()
+        override fun openBluetoothSettings() = this@MainActivity.openBluetoothSettings()
         override fun openLog() = startActivity(Intent(this@MainActivity, LogActivity::class.java))
         override fun openAbout() = startActivity(Intent(this@MainActivity, AboutActivity::class.java))
         override fun setCodec(address: String, config: CodecConfig) = setCodecConfig(remoteDevice(address), config)
@@ -214,6 +226,11 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
             permissionState = PermissionState.DENIED
         }
         logPermissionState()
+    }
+
+    // Started for a result, since the system's dialog has to name the app asking
+    private val enableBluetoothLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        pullBluetoothState()
     }
 
     private val associationLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -253,7 +270,10 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
                         devices = connectedDevices,
                         canAssociate = PermissionUtil.canAssociate(this),
                         linkingAddress = linkingAddress,
-                        showDevelopmentOptions = showDevelopmentOptions
+                        showDevelopmentOptions = showDevelopmentOptions,
+                        bluetoothEnabled = bluetoothEnabled,
+                        devicesKnown = devicesKnown,
+                        hasSavedDevices = hasSavedDevices
                     ),
                     actions,
                     initiallyExpanded = autoExpanded
@@ -306,6 +326,24 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
 
     private fun openAppSettings() {
         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+    }
+
+    private fun enableBluetooth() {
+        try {
+            enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "can't ask to turn on Bluetooth", e)
+            Toast.makeText(this, "Couldn't turn on Bluetooth", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openBluetoothSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "can't open the Bluetooth settings", e)
+            Toast.makeText(this, "Couldn't open the Bluetooth settings", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun connectProfile() {
@@ -508,9 +546,17 @@ class MainActivity : ComponentActivity(), BluetoothProfile.ServiceListener {
     // A lone device on the first list with devices in it starts expanded, once per activity
     private var autoExpanded by mutableStateOf(emptySet<String>())
     private var firstDevicesSeen = false
+    private var bluetoothEnabled by mutableStateOf(true)
+    private var devicesKnown by mutableStateOf(false)
+    private var hasSavedDevices by mutableStateOf(false)
+    private var profileWaitPolls = 0
 
     private fun pullBluetoothState() {
         val profile = a2dpProfile
+        bluetoothEnabled = getSystemService(BluetoothManager::class.java).adapter?.isEnabled == true
+        hasSavedDevices = PreferredCodecStore.hasAny(this)
+        profileWaitPolls = if (profile != null || !bluetoothEnabled) 0 else profileWaitPolls + 1
+        devicesKnown = profile != null || profileWaitPolls > PROFILE_WAIT_POLLS
         if (profile == null) {
             connectedDevices = emptyList()
             return
@@ -1258,33 +1304,14 @@ private fun LinkBanner(device: DeviceData, canLink: Boolean) {
 }
 
 @Composable
-private fun PermissionRequired(modifier: Modifier, permissionState: PermissionState, actions: MainScreenActions) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            "Auto Bluetooth Codec needs the Nearby devices permission to access the codec of your Bluetooth devices.",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(16.dp))
-        if (permissionState == PermissionState.PERMANENTLY_DENIED) {
-            Text(
-                "Allow it in the app settings under Permissions.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { actions.openAppSettings() }) {
-                Text("Open settings")
-            }
-        } else {
-            Button(onClick = { actions.requestPermission() }) {
-                Text("Grant permission")
-            }
-        }
+private fun PermissionRequired(contentPadding: PaddingValues, permissionState: PermissionState, actions: MainScreenActions) {
+    val title = "Codec needs your permission"
+    val reason = "Auto Bluetooth Codec needs the Nearby devices permission to access the codec of your Bluetooth devices."
+    if (permissionState == PermissionState.PERMANENTLY_DENIED) {
+        EmptyState(DogScene.AT_DOOR, title, "Open settings", actions::openAppSettings, contentPadding,
+            listOf(reason, "Allow it in the app settings under Permissions."))
+    } else {
+        EmptyState(DogScene.AT_DOOR, title, "Grant permission", actions::requestPermission, contentPadding, listOf(reason))
     }
 }
 
@@ -1323,8 +1350,8 @@ internal fun AppMenu(onOpenLog: () -> Unit, onOpenAbout: () -> Unit) {
 internal fun deviceTag(device: DeviceData) = "device_" + device.address.uppercase()
 
 /**
- * The main screen: the connected devices with their codecs, or the saved devices, which are still to come. The cards
- * of the devices in [initiallyExpanded], by address, start expanded, for the previews.
+ * The main screen: the connected devices with their codecs, or the saved devices, which are still to come, or an empty
+ * state with a way out. The cards of the devices in [initiallyExpanded], by address, start expanded, for the previews.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -1339,13 +1366,21 @@ internal fun MainScreen(state: MainScreenState, actions: MainScreenActions, init
         contentWindowInsets = WindowInsets.safeDrawing
     ) { innerPadding ->
         when {
-            // Empty until the saved devices are designed
-            list == DeviceList.SAVED -> {}
+            // With saved devices it stays empty until their list is designed
+            list == DeviceList.SAVED -> if (!state.hasSavedDevices) {
+                EmptyState(DogScene.TOY_BOX, "Codec has no saved devices yet", "Show connected devices",
+                    { list = DeviceList.CONNECTED }, innerPadding)
+            }
             state.permissionState != PermissionState.GRANTED ->
-                CappedContent(NARROW_CONTENT, tintSides = false) { side ->
-                    PermissionRequired(Modifier.padding(innerPadding).padding(horizontal = side), state.permissionState,
-                        actions)
-                }
+                PermissionRequired(innerPadding, state.permissionState, actions)
+            !state.bluetoothEnabled ->
+                EmptyState(DogScene.ASLEEP, "Codec is asleep", "Turn on Bluetooth", actions::enableBluetooth, innerPadding,
+                    listOf("Bluetooth is off"))
+            state.devices.isEmpty() -> if (state.devicesKnown) {
+                // Only A2DP devices are listed, a connected watch or keyboard doesn't count
+                EmptyState(DogScene.SNIFFING, "Codec hasn't found any audio devices", "Open Bluetooth settings",
+                    actions::openBluetoothSettings, innerPadding)
+            }
             else ->
                 CappedContent(NARROW_CONTENT, tintSides = false) { side ->
                     // Padding inside the scroll container, so the cards scroll behind the navigation bar

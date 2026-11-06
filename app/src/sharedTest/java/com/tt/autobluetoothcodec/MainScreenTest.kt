@@ -21,7 +21,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** V1 to V6 of the test concept: the permission screens, what the main screen shows for a device, and what it asks for. */
+/**
+ * V1 to V6 and V14 of the test concept: the permission screens, what the main screen shows for a device, what it asks
+ * for, and its empty states.
+ */
 @RunWith(AndroidJUnit4::class)
 class MainScreenTest {
     @get:Rule
@@ -66,6 +69,67 @@ class MainScreenTest {
         text("Allow it in the app settings under Permissions.").assertExists()
         text("Open settings").performClick()
         assertEquals(listOf("openAppSettings"), actions.calls)
+    }
+
+    // V14
+
+    @Test
+    fun withBluetoothOffItCanBeTurnedOn() {
+        show(state(bluetoothEnabled = false))
+        text("Codec is asleep").assertExists()
+        text("Bluetooth is off").assertExists()
+        text("Turn on Bluetooth").performClick()
+        assertEquals(listOf("enableBluetooth"), actions.calls)
+    }
+
+    @Test
+    fun theMissingPermissionComesBeforeBluetoothBeingOff() {
+        show(state(permissionState = PermissionState.DENIED, bluetoothEnabled = false))
+        text("Codec needs your permission").assertExists()
+        text("Codec is asleep").assertDoesNotExist()
+        text("Bluetooth is off").assertDoesNotExist()
+    }
+
+    @Test
+    fun withoutDevicesTheBluetoothSettingsAreOffered() {
+        show(state())
+        text("Codec hasn't found any audio devices").assertExists()
+        text("Open Bluetooth settings").performClick()
+        assertEquals(listOf("openBluetoothSettings"), actions.calls)
+    }
+
+    @Test
+    fun whileTheProfileConnectsNoEmptyStateShows() {
+        show(state(devicesKnown = false))
+        text("Codec hasn't found any audio devices").assertDoesNotExist()
+        text("Bluetooth is off").assertDoesNotExist()
+    }
+
+    @Test
+    fun devicesShowInsteadOfAnEmptyState() {
+        show(device())
+        text(NAME).assertExists()
+        text("Codec hasn't found any audio devices").assertDoesNotExist()
+    }
+
+    @Test
+    fun withNothingSavedTheSavedListLeadsBackToTheConnectedDevices() {
+        show(device())
+        compose.onNodeWithTag("list_toggle").performClick()
+        compose.onNodeWithTag("list_saved").performClick()
+        text("Codec has no saved devices yet").assertExists()
+        text("Show connected devices").performClick()
+        text("Connected devices").assertExists()
+        text(NAME).assertExists()
+    }
+
+    @Test
+    fun withSavedDevicesTheSavedListHasNoEmptyState() {
+        show(state(device(preferred = ldac())))
+        compose.onNodeWithTag("list_toggle").performClick()
+        compose.onNodeWithTag("list_saved").performClick()
+        text("Saved devices").assertExists()
+        text("Codec has no saved devices yet").assertDoesNotExist()
     }
 
     // The top bar

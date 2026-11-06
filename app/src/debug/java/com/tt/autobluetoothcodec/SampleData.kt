@@ -91,7 +91,11 @@ internal object SampleData {
         canAssociate: Boolean = true,
         linkingAddress: String? = null,
         showDevelopmentOptions: Boolean = false,
-    ) = MainScreenState(permissionState, devices.toList(), canAssociate, linkingAddress, showDevelopmentOptions)
+        bluetoothEnabled: Boolean = true,
+        devicesKnown: Boolean = true,
+        hasSavedDevices: Boolean = devices.any { it.preferredConfig != null },
+    ) = MainScreenState(permissionState, devices.toList(), canAssociate, linkingAddress, showDevelopmentOptions,
+        bluetoothEnabled, devicesKnown, hasSavedDevices)
 
     val TODAY: LocalDate = LocalDate.of(2026, 10, 27)
 
