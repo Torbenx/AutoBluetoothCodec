@@ -923,8 +923,8 @@ private fun CodecConfigSelection(device: DeviceData, onConfigChange: (CodecConfi
 
         Spacer(Modifier.height(16.dp))
         ConfigSelectRow(
-            "Bits per Sample",
-            CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}", it, isSampleSizeSelectable(device, config, it)) },
+            "Sample Size",
+            CodecConfig.SAMPLE_SIZES.map { ConfigRowItem("${CodecConfig.getBitsPerSample(it)}-bit", it, isSampleSizeSelectable(device, config, it)) },
             config.bitsPerSample,
             onSelected = {
                 val newConfig = config.clone() as CodecConfig
@@ -1017,7 +1017,7 @@ private fun CodecChips(device: DeviceData, state: MainScreenState) {
             ActiveConfigChip("$it Hz")
         }
         CodecConfig.getBitsPerSample(config.bitsPerSample)?.let {
-            ActiveConfigChip("$it bits/sample")
+            ActiveConfigChip("$it-bit")
         }
         if (config is LDACCodecConfig) {
             if (config.bitrate == LDACCodecConfig.BITRATE_ADAPTIVE) {

@@ -102,7 +102,7 @@ class MainScreenTest {
         text(NAME).assertExists()
         text("LDAC").assertExists()
         text("96000 Hz").assertExists()
-        text("32 bits/sample").assertExists()
+        text("32-bit").assertExists()
         // The system default bitrate has no chip
         text("Adaptive").assertDoesNotExist()
     }
@@ -340,7 +340,7 @@ class MainScreenTest {
         chip("aptX HD").assertIsEnabled()
         chip("Opus").assertIsNotEnabled()
         chip("44100 Hz").assertIsEnabled()
-        chip("16").assertIsEnabled()
+        chip("16-bit").assertIsEnabled()
         // Collapsed chips are gone, and the bitrate row shows the system default as adaptive
         text("96000 Hz").assertExists()
         text("Bitrate").assertExists()
@@ -393,7 +393,7 @@ class MainScreenTest {
         show(device())
         expand()
         chip("48000 Hz").performClick()
-        chip("24").performClick()
+        chip("24-bit").performClick()
         chip("990 kbps").performClick()
         assertEquals(listOf(
             "setCodec $ADDRESS LDAC, 48 kHz, 32-bit",
@@ -408,8 +408,8 @@ class MainScreenTest {
         expand()
         chip("44100 Hz").assertIsEnabled()
         chip("88200 Hz").assertIsNotEnabled()
-        chip("16").assertIsNotEnabled()
-        chip("32").assertIsNotEnabled()
+        chip("16-bit").assertIsNotEnabled()
+        chip("32-bit").assertIsNotEnabled()
         text("Bitrate").assertDoesNotExist()
     }
 }
