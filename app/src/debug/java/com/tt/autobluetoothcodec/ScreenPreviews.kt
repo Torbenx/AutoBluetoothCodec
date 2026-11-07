@@ -111,8 +111,11 @@ internal val emptyStates = listOf(
     mainScene("Permission permanently denied", state(permissionState = PermissionState.PERMANENTLY_DENIED)),
 )
 
-/** The sniffing dog walking left, sniffing, mid-turn and walking right. The states above only show its start. */
-internal val sniffingFrames = listOf(1.9f, 4.3f, 5.22f, 7.5f).map { seconds ->
+/**
+ * The sniffing dog walking left, sniffing with all puffs showing, pausing, mid-turn and walking right. The states
+ * above only show its start.
+ */
+internal val sniffingFrames = listOf(0.88f, 3.15f, 5.1f, 5.325f, 6.53f).map { seconds ->
     Scene("Sniffing at $seconds s") {
         AppTheme {
             Surface(Modifier.fillMaxSize()) {
