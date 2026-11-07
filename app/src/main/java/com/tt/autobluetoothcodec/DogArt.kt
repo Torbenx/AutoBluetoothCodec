@@ -39,8 +39,8 @@ internal const val DOG_ART_RATIO = 240f / 172f
 
 private const val ART_WIDTH = 240f
 
-/** Every motion fits a whole number of times into this, so the loop has no seam. */
-private const val LOOP_SECONDS = 12f
+/** Every motion on this clock fits a whole number of times into it, so the loop has no seam. */
+internal const val LOOP_SECONDS = 12f
 
 private const val TAU = 2 * PI.toFloat()
 
@@ -124,44 +124,89 @@ internal data class SniffPose(
     val scent: List<Float>,
 )
 
+// Each step's swing covers what the walk covers in that time, so the feet don't slide over the floor
+private const val WALK_SPEED = 20f
+private const val STEP_SECONDS = 1.5f
+// Starting and stopping, over which walking and sniffing blend
+private const val RAMP_SECONDS = 0.3f
+private const val TURN_SECONDS = 0.6f
+
+/** One way along the sofa: Codec walks [from] one place [to] another, stands there sniffing and turns around. */
+internal class SniffLeg(val from: Float, val to: Float, val sniffSeconds: Float) {
+    val walkSeconds = abs(to - from) / WALK_SPEED
+    val standSeconds = sniffSeconds + TURN_SECONDS
+    val seconds = walkSeconds + standSeconds
+    val facing = if (to < from) 1f else -1f
+}
+
+// From -4 to 66, so the nose stays above the floor at both ends. The legs fill the loop, which SniffPoseTest checks.
+internal val SNIFF_LEGS = listOf(SniffLeg(66f, -4f, 1.5f), SniffLeg(-4f, 66f, 2.3f))
+
+/** Where Codec is on its way around the sofa at one moment. */
+internal class SniffMoment(
+    val x: Float,
+    // 1 faces left, -1 faces right, in between it's turning
+    val facing: Float,
+    // 1 while walking, 0 while standing, in between it's starting or stopping
+    val walking: Float,
+    // Since Codec stopped, negative while it's slowing down to stop. It jumps halfway through each walk.
+    val sinceStop: Float,
+)
+
+/** Codec walks along the sofa, stops to sniff, turns around and walks back. */
+internal fun sniffMoment(seconds: Float): SniffMoment {
+    var time = seconds.mod(LOOP_SECONDS)
+    var index = 0
+    while (index < SNIFF_LEGS.lastIndex && time >= SNIFF_LEGS[index].seconds) {
+        time -= SNIFF_LEGS[index].seconds
+        index++
+    }
+    val leg = SNIFF_LEGS[index]
+    // Early in a walk, the last stop is the one before it, which may be in the previous loop
+    val sinceStop = if (time < leg.walkSeconds / 2) {
+        SNIFF_LEGS[(index - 1).mod(SNIFF_LEGS.size)].standSeconds + time
+    } else {
+        time - leg.walkSeconds
+    }
+    fun ramp(time: Float) = (time / RAMP_SECONDS).coerceIn(0f, 1f)
+    return when {
+        time < leg.walkSeconds -> SniffMoment(leg.from + (leg.to - leg.from) * time / leg.walkSeconds, leg.facing,
+            ramp(time) * ramp(leg.walkSeconds - time), sinceStop)
+        sinceStop < leg.sniffSeconds -> SniffMoment(leg.to, leg.facing, 0f, sinceStop)
+        else -> {
+            val turned = ((sinceStop - leg.sniffSeconds) / TURN_SECONDS).coerceIn(0f, 1f).let { it * it * (3 - 2 * it) }
+            SniffMoment(leg.to, leg.facing * cos(PI.toFloat() * turned), 0f, sinceStop)
+        }
+    }
+}
+
 /**
- * Codec walks along the sofa, stops to sniff, turns around and walks back. Each step's swing covers what the walk
- * covers in that time, at 20 units per second and 1.5 seconds per step, so the feet don't slide over the floor.
+ * The sniffing dog's body at the moment [sniffMoment] describes. What goes on through the walk, the steps, the neck's
+ * sway and the tail, follows the loop's clock. The sniffing follows the time since Codec stopped, so it starts alike at
+ * every stop.
  */
 internal fun sniffPose(seconds: Float): SniffPose {
     val t = seconds.mod(LOOP_SECONDS)
-    fun ramp(time: Float) = (time / 0.3f).coerceIn(0f, 1f)
-    fun turn(time: Float): Float {
-        val eased = ((time / 0.6f).coerceIn(0f, 1f)).let { it * it * (3 - 2 * it) }
-        return cos(PI.toFloat() * eased)
-    }
-    val x: Float
-    val facing: Float
-    val walking: Float
-    when {
-        // From -4 to 66, so the nose stays above the floor at both ends
-        t < 3.5f -> { x = 66 - 20 * t; facing = 1f; walking = ramp(t) * ramp(3.5f - t) }
-        t < 5f -> { x = -4f; facing = 1f; walking = 0f }
-        t < 5.6f -> { x = -4f; facing = turn(t - 5f); walking = 0f }
-        t < 9.1f -> { x = 20 * (t - 5.6f) - 4; facing = -1f; walking = ramp(t - 5.6f) * ramp(9.1f - t) }
-        t < 11.4f -> { x = 66f; facing = -1f; walking = 0f }
-        else -> { x = 66f; facing = -turn(t - 11.4f); walking = 0f }
-    }
-    val step = wave(t, 1.5f)
+    val moment = sniffMoment(t)
+    val walking = moment.walking
     val sniffing = 1 - walking
+    val sinceStop = moment.sinceStop
+    val step = wave(t, STEP_SECONDS)
     val neck = 2 * step - 2.5f * sniffing
-    val head = 1.6f * wave(t, 0.25f) * (1 - 0.5f * walking)
+    // Nodding a little while walking, then bobbing faster to the sniffs, the clock jumps where neither shows
+    val head = 0.8f * walking * wave(t, 0.25f) + 1.6f * sniffing * wave(sinceStop, 0.25f)
     return SniffPose(
-        x = x,
+        x = moment.x,
         bounce = 1.1f * abs(step) * walking,
         // A squashed dog still has to be drawn, not vanish for a frame
-        facing = if (abs(facing) < 0.04f) 0.04f else facing,
+        facing = if (abs(moment.facing) < 0.04f) 0.04f else moment.facing,
         diagonalLegs = 12 * step * walking,
         neck = neck,
         head = head,
         ear = -neck * 1.5f - head * 2 + 2 * step * walking,
         tail = (8 + 8 * sniffing) * wave(t, 0.4f),
-        scent = List(3) { sniffing * max(0f, wave(t, 0.5f, it * 0.9f)) },
+        // The puffs start at the stop, one after the other, each from nothing as long as its shift is below half a turn
+        scent = List(3) { if (sinceStop < 0) 0f else sniffing * max(0f, wave(sinceStop, 0.5f, it * 0.9f)) },
     )
 }
 
